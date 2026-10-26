@@ -395,7 +395,10 @@ func TestSkill(t *testing.T) {
 		t.Fatalf("installed skill differs: %v", err)
 	}
 	wd, _ := os.Getwd()
-	tmp := t.TempDir()
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.Chdir(tmp)
 	defer os.Chdir(wd)
 	for agent, sub := range skillDirs {
