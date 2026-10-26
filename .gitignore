@@ -1,0 +1,4 @@
+dist/
+/tgbot
+/tgbot.exe
+*.test

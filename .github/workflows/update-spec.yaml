@@ -1,0 +1,28 @@
+name: Update Bot API spec
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: scripts/update-spec.sh
+      - run: go test ./...
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "Update Bot API spec"
+          title: "Update Bot API spec"
+          body: "Automated refresh of internal/spec/api.json from PaulSonOfLars/telegram-bot-api-spec."
+          branch: update-bot-api-spec
