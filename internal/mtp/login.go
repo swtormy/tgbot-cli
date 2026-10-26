@@ -109,14 +109,12 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 	}
 
 	dispatcher := tg.NewUpdateDispatcher()
-	var client *telegram.Client
+	var handler telegram.UpdateHandler
 	if o.QR {
-		client = p.newClient(o.Options, dispatcher)
-	} else {
-		client = p.newClient(o.Options, nil)
+		handler = dispatcher
 	}
 	res := &LoginResult{}
-	err = client.Run(ctx, func(ctx context.Context) error {
+	err = p.runClient(ctx, o.Options, handler, func(ctx context.Context, client *telegram.Client) error {
 		st, err := client.Auth().Status(ctx)
 		if err != nil {
 			return wrapRPC(err)

@@ -25,6 +25,7 @@ type Config struct {
 	APIID     int       `json:"api_id"`
 	APIHash   string    `json:"api_hash"`
 	Access    string    `json:"access"`
+	Transport string    `json:"transport,omitempty"` // set to websocket once the direct protocol proved blocked
 	UserID    int64     `json:"user_id,omitempty"`
 	Username  string    `json:"username,omitempty"`
 	Name      string    `json:"name,omitempty"`

@@ -127,7 +127,7 @@ Use --profile NAME to keep several accounts side by side.`,
 				fmt.Fprintln(a.errOut, "Importing a Telethon session. Stop that Telethon client now: two clients on one session make Telegram revoke it.")
 			}
 			o := mtp.LoginOptions{
-				Options: a.mtpOptions(), APIID: apiID, APIHash: apiHash, Phone: phone, Code: code,
+				Options: a.mtpOptions(uf), APIID: apiID, APIHash: apiHash, Phone: phone, Code: code,
 				Password: a.getenv("TGBOT_PASSWORD"), QR: qr, TelethonSession: telethon, Prompt: prompt,
 			}
 			if qr {
@@ -213,7 +213,7 @@ new login (with a code) is needed. Needs a terminal, so an agent cannot do it.
 			}
 			ctx, stop := signalCtx(cmd)
 			defer stop()
-			revoked, err := p.Logout(ctx, a.mtpOptions(), local)
+			revoked, err := p.Logout(ctx, a.mtpOptions(uf), local)
 			if err != nil {
 				return a.mtpErr(err)
 			}

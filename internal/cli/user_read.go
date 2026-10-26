@@ -250,7 +250,7 @@ tgbot user commands wait until it ends.`,
 			}
 			ctx, stop := signalCtx(cmd)
 			defer stop()
-			err = p.Watch(ctx, a.mtpOptions(), mtp.WatchOpts{Peers: peers, For: forD, Max: max, IncludeOwn: own}, func(m mtp.Message) error {
+			err = p.Watch(ctx, a.mtpOptions(uf), mtp.WatchOpts{Peers: peers, For: forD, Max: max, IncludeOwn: own}, func(m mtp.Message) error {
 				return a.emitValue(m)
 			})
 			if err != nil {

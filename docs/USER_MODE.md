@@ -125,6 +125,16 @@ tgbot user raw users.getFullUser '{"id":{"@user":"@durov"}}'
 
 The schema inside the binary is Telegram API layer 232; `tgbot user raw describe` shows which layer your binary has.
 
+## Restricted networks
+
+Bot mode needs only HTTPS to `api.telegram.org`. User mode speaks Telegram's own protocol, so a firewall can block it while bots still work. tgbot handles this itself:
+
+1. It connects directly. If there is no answer within `--connect-timeout` (20s), it says so on stderr and tries WebSocket over HTTPS on port 443 (`*.web.telegram.org`), the same route Telegram Web uses.
+2. If WebSocket works, it is remembered in `config.json` (`"transport": "websocket"`) so later runs skip the failing attempt.
+3. If both fail, it exits with code 1 and a message that names what was tried. It never hangs silently.
+
+Force a route with `--transport tcp|websocket` (or `TGBOT_TRANSPORT`). Add a proxy with `--proxy socks5://host:port` or `TGBOT_PROXY`; `http://host:port` proxies work with WebSocket. A standard `HTTPS_PROXY` is also honored by the WebSocket route.
+
 ## Several accounts
 
 Add `--profile NAME` (or set `TGBOT_PROFILE`) to any `tgbot user` command, including `login`. Each profile has its own session, access level and cursors. `tgbot user profiles` lists them.
@@ -140,6 +150,7 @@ Add `--profile NAME` (or set `TGBOT_PROFILE`) to any `tgbot user` command, inclu
 | exit 1, `FLOOD_WAIT` | Too many calls. Wait `retry_after` seconds. |
 | "another tgbot user command has held profile" | Another command is still running. Wait, or stop the stuck one. |
 | "id ... is not known to this account" | Telegram needs an access hash. Refer to the chat once by `@username` or find it in `dialogs`. |
+| "cannot reach Telegram: tried tcp ..., websocket ..." | The network blocks Telegram's protocol (common on cloud sandboxes and corporate networks, even when `api.telegram.org` works for bots). Use a proxy: `--proxy socks5://host:port` or `TGBOT_PROXY=...` (an `http://` proxy works with `--transport websocket`), or another network. |
 | Login code never arrives | It arrives inside the Telegram app on your other device, not by SMS. After repeated tries Telegram delays codes; wait. |
 
 ## Files and environment variables
@@ -159,6 +170,7 @@ Config directory: `$TGBOT_HOME`, or `~/.config/tgbot` on Linux, `~/Library/Appli
 | `TGBOT_HOME` | Config directory |
 | `TGBOT_PROFILE` | Default profile |
 | `TGBOT_API_ID`, `TGBOT_API_HASH` | Override the saved credentials |
+| `TGBOT_TRANSPORT`, `TGBOT_PROXY` | Same as `--transport` and `--proxy` |
 | `TGBOT_PASSWORD` | Two-step password for a non-interactive login (not stored) |
 
 Exit codes: 0 ok, 1 Telegram or network error, 2 bad arguments, 3 not logged in or session ended, 4 blocked by the access policy.

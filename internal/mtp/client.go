@@ -11,6 +11,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/dcs"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 )
@@ -21,6 +22,10 @@ type Options struct {
 	Stderr       io.Writer
 	MaxFloodWait time.Duration // longest FLOOD_WAIT that is waited out instead of reported
 	LockTimeout  time.Duration // how long to queue behind another tgbot process
+
+	Transport      string        // auto (default), tcp or websocket
+	Proxy          string        // socks5://host:port, or http://host:port with websocket
+	ConnectTimeout time.Duration // how long one transport may take to connect
 }
 
 // Conn is a connected, authorized account.
@@ -41,6 +46,9 @@ func (o *Options) defaults() {
 	}
 	if o.LockTimeout == 0 {
 		o.LockTimeout = 90 * time.Second
+	}
+	if o.ConnectTimeout == 0 {
+		o.ConnectTimeout = 20 * time.Second
 	}
 	if o.Version == "" {
 		o.Version = "dev"
@@ -65,7 +73,7 @@ func (p *Profile) lock(ctx context.Context, timeout time.Duration) (func(), erro
 	return func() { _ = fl.Unlock() }, nil
 }
 
-func (p *Profile) newClient(o Options, handler telegram.UpdateHandler) *telegram.Client {
+func (p *Profile) newClient(o Options, handler telegram.UpdateHandler, res dcs.Resolver) *telegram.Client {
 	opts := telegram.Options{
 		SessionStorage: &fileStorage{path: p.SessionPath()},
 		Device: telegram.DeviceConfig{
@@ -77,6 +85,7 @@ func (p *Profile) newClient(o Options, handler telegram.UpdateHandler) *telegram
 		},
 		Middlewares: []telegram.Middleware{floodWaiter(o.MaxFloodWait, o.Stderr)},
 		DialTimeout: 20 * time.Second,
+		Resolver:    res,
 	}
 	if handler != nil {
 		opts.UpdateHandler = handler
@@ -125,9 +134,8 @@ func (p *Profile) openWith(ctx context.Context, o Options, handler telegram.Upda
 	defer unlock()
 
 	peers := LoadPeers(p.PeersPath())
-	client := p.newClient(o, handler)
 	var inner error
-	err = client.Run(ctx, func(ctx context.Context) error {
+	err = p.runClient(ctx, o, handler, func(ctx context.Context, client *telegram.Client) error {
 		st, err := client.Auth().Status(ctx)
 		if err != nil {
 			return wrapRPC(err)

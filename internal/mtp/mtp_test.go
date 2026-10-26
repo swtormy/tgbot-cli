@@ -247,3 +247,52 @@ func TestSessionStorageKeepsBackup(t *testing.T) {
 		t.Fatalf("fallback = %q", b)
 	}
 }
+
+func TestTransportOrder(t *testing.T) {
+	cases := []struct {
+		o    Options
+		pin  string
+		want string
+	}{
+		{Options{}, "", "tcp,websocket"},
+		{Options{Transport: "auto"}, "", "tcp,websocket"},
+		{Options{}, "websocket", "websocket,tcp"},
+		{Options{Transport: "tcp"}, "websocket", "tcp"},
+		{Options{Transport: "websocket"}, "", "websocket"},
+		{Options{Proxy: "http://p:8080"}, "", "websocket"},
+		{Options{Proxy: "socks5://p:1080"}, "", "tcp,websocket"},
+	}
+	for _, tc := range cases {
+		p := &Profile{Cfg: Config{Transport: tc.pin}}
+		got, err := p.transportOrder(tc.o)
+		if err != nil || strings.Join(got, ",") != tc.want {
+			t.Errorf("%+v pin=%q: got %v, %v; want %s", tc.o, tc.pin, got, err, tc.want)
+		}
+	}
+	p := &Profile{}
+	if _, err := p.transportOrder(Options{Transport: "tcp", Proxy: "http://p:1"}); err == nil {
+		t.Error("tcp over an http proxy accepted")
+	}
+	if _, err := p.transportOrder(Options{Transport: "carrier-pigeon"}); err == nil {
+		t.Error("bad transport accepted")
+	}
+}
+
+func TestResolverFor(t *testing.T) {
+	for _, tr := range []string{TransportTCP, TransportWebsocket} {
+		if _, err := resolverFor(tr, ""); err != nil {
+			t.Errorf("%s: %v", tr, err)
+		}
+	}
+	if _, err := resolverFor(TransportTCP, "socks5://127.0.0.1:1080"); err != nil {
+		t.Error(err)
+	}
+	if _, err := resolverFor(TransportWebsocket, "http://127.0.0.1:8080"); err != nil {
+		t.Error(err)
+	}
+	for _, bad := range []string{"nonsense", "ftp://h:1", "http://h:1"} {
+		if _, err := resolverFor(TransportTCP, bad); err == nil {
+			t.Errorf("tcp accepted proxy %q", bad)
+		}
+	}
+}
