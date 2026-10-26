@@ -21,7 +21,7 @@ tgbot user status
 ```
 
 - Works: JSON with `user`, `access` (`read` or `write`) and `session_expires_if_idle`.
-- Exit code 3 (`type":"auth"`): not logged in or the session died. Tell the user to run `tgbot user login` in their own terminal (it asks for api_id/api_hash from https://my.telegram.org, phone, code). Do not try to work around it.
+- Exit code 3 (`type":"auth"`): not logged in or the session died. Tell the user to run `tgbot user login` in their own terminal (it asks for api_id/api_hash from https://my.telegram.org, phone, code). Do not try to work around it. If the user says the login code never came: `via: app` means it is a message from the "Telegram" chat in an already-logged-in app; after `resend_after_seconds` they can run `tgbot user login --phone <phone> --resend` for SMS/call.
 - Exit code 1 with "cannot reach Telegram": the network blocks Telegram's protocol. tgbot already tried the WebSocket fallback. Tell the user to set `TGBOT_PROXY=socks5://host:port` (or run elsewhere). Do not retry in a loop.
 - Exit code 4 (`type":"blocked"`): the action needs `write` access. Tell the user to run `tgbot user access write` in their own terminal if they want that. You cannot do it for them.
 

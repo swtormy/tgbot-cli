@@ -296,3 +296,22 @@ func TestResolverFor(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeKindAndHint(t *testing.T) {
+	s := &tg.AuthSentCode{Type: &tg.AuthSentCodeTypeApp{Length: 5}}
+	s.SetTimeout(60)
+	s.SetNextType(&tg.AuthCodeTypeSMS{})
+	via, next, timeout := sentInfo(s)
+	if via != "app" || next != "sms" || timeout != 60 {
+		t.Fatalf("got %q %q %d", via, next, timeout)
+	}
+	h := CodeHint(via, next, timeout)
+	for _, want := range []string{"'Telegram' chat", "--resend", "sms", "60s"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("hint %q lacks %q", h, want)
+		}
+	}
+	if h := CodeHint("sms", "", 0); !strings.Contains(h, "SMS") || strings.Contains(h, "--resend") {
+		t.Errorf("sms hint = %q", h)
+	}
+}

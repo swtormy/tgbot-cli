@@ -34,6 +34,8 @@ Read this page once, then log in once. After that, humans and agents just run co
    tgbot user login --phone +15551234567 --code 12345         # TGBOT_PASSWORD=... too, if you have 2FA
    ```
 
+   The first command prints `via`, `hint`, and, when Telegram has a fallback, `resend_via` and `resend_after_seconds`. `"via":"app"` means the code is a message from the **Telegram** service chat in a Telegram app that is already logged in to this account (not an SMS). No such app, or nothing arrived? Wait `resend_after_seconds`, then run `tgbot user login --phone +15551234567 --resend` to get the code by SMS or a call. Still nothing: `tgbot user login --qr` in a terminal, or import a Telethon session (`--telethon-session`).
+
 3. Check: `tgbot user status` prints your name, the access level and when an idle session would expire.
 4. Install the agent skill: `tgbot skill install tgbot-user` (add `--global` for all projects, `--agent cursor` or `--agent grok` for other tools).
 
@@ -151,7 +153,7 @@ Add `--profile NAME` (or set `TGBOT_PROFILE`) to any `tgbot user` command, inclu
 | "another tgbot user command has held profile" | Another command is still running. Wait, or stop the stuck one. |
 | "id ... is not known to this account" | Telegram needs an access hash. Refer to the chat once by `@username` or find it in `dialogs`. |
 | "cannot reach Telegram: tried tcp ..., websocket ..." | The network blocks Telegram's protocol (common on cloud sandboxes and corporate networks, even when `api.telegram.org` works for bots). Use a proxy: `--proxy socks5://host:port` or `TGBOT_PROXY=...` (an `http://` proxy works with `--transport websocket`), or another network. |
-| Login code never arrives | It arrives inside the Telegram app on your other device, not by SMS. After repeated tries Telegram delays codes; wait. |
+| Login code never arrives | `via: app` = a message from the "Telegram" chat in an already-logged-in app, not an SMS. Wait `resend_after_seconds`, then `login --phone ... --resend` (SMS/call). Repeated tries make Telegram delay codes. Last resort: `login --qr`. |
 
 ## Files and environment variables
 

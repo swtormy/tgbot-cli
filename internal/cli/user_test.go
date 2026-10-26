@@ -207,3 +207,11 @@ func TestUserSkill(t *testing.T) {
 		t.Fatalf("installed skill differs: %v", err)
 	}
 }
+
+func TestLoginResendNeedsAPendingCode(t *testing.T) {
+	env := map[string]string{"TGBOT_HOME": t.TempDir()}
+	r := run(t, env, "", "user", "login", "--api-id", "1", "--api-hash", "x", "--phone", "+15550001111", "--resend", "--connect-timeout", "2s")
+	if r.code != 2 || !strings.Contains(r.err, "no code was requested") {
+		t.Fatalf("exit %d err %s", r.code, r.err)
+	}
+}

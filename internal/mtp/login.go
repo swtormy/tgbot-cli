@@ -28,6 +28,7 @@ type LoginOptions struct {
 	QR              bool
 	TelethonSession string
 	Code            string // non-interactive step 2
+	Resend          bool   // ask Telegram to deliver the pending code another way (SMS or call)
 	Password        string // 2FA password, only for this call
 	Prompt          func(label string, secret bool) (string, error)
 	ShowQR          func(url string)
@@ -37,6 +38,8 @@ type LoginResult struct {
 	AlreadyLoggedIn bool
 	CodeSent        bool
 	CodeVia         string
+	CodeNext        string // how a resend would be delivered, if Telegram allows one
+	CodeTimeout     int    // seconds before a resend is allowed
 	Self            *tg.User
 }
 
@@ -51,19 +54,65 @@ func (p *Profile) pendingPath() string { return filepath.Join(p.Dir, "login_pend
 type prompter struct {
 	o     LoginOptions
 	phone string
+	save  func(phone, hash string)
+}
+
+// codeKind names how Telegram delivers a code: app, sms, call, ...
+func codeKind(t any) string {
+	n := fmt.Sprintf("%T", t)
+	n = strings.TrimPrefix(n, "*tg.AuthSentCodeType")
+	n = strings.TrimPrefix(n, "*tg.AuthCodeType")
+	return strings.ToLower(n)
+}
+
+func sentInfo(s *tg.AuthSentCode) (via, next string, timeout int) {
+	via = codeKind(s.Type)
+	if n, ok := s.GetNextType(); ok {
+		next = codeKind(n)
+	}
+	timeout, _ = s.GetTimeout()
+	return
+}
+
+// CodeHint tells a person where to look for the code.
+func CodeHint(via, next string, timeout int) string {
+	var h string
+	switch via {
+	case "app":
+		h = "The code is a message from the 'Telegram' chat inside the Telegram app on a device where this account is already logged in. It is not an SMS."
+	case "sms", "fragmentsms", "firebasesms", "smsword", "smsphrase":
+		h = "The code comes by SMS."
+	case "call":
+		h = "Telegram will phone you and read the code out."
+	case "flashcall", "missedcall":
+		h = "Telegram will call from a number whose last digits are the code."
+	case "emailcode":
+		h = "The code was sent to the e-mail address linked to the account."
+	default:
+		h = "Telegram sent the code (" + via + ")."
+	}
+	if next != "" {
+		h += fmt.Sprintf(" If nothing arrives, wait %ds and run the same command with --resend to get it by %s.", timeout, next)
+	}
+	return h
 }
 
 func (a *prompter) Phone(ctx context.Context) (string, error) {
 	if a.phone != "" {
 		return a.phone, nil
 	}
-	return a.o.Prompt("Phone number (with country code, e.g. +15551234567)", false)
+	ph, err := a.o.Prompt("Phone number (with country code, e.g. +15551234567)", false)
+	a.phone = ph
+	return ph, err
 }
 
 func (a *prompter) Code(ctx context.Context, sent *tg.AuthSentCode) (string, error) {
-	where := strings.TrimPrefix(fmt.Sprintf("%T", sent.Type), "*tg.AuthSentCodeType")
-	where = strings.TrimPrefix(where, "*tg.AuthSentCodeTypeApp")
-	return a.o.Prompt(fmt.Sprintf("Login code (sent via %s; the Telegram app is the usual place)", strings.ToLower(where)), false)
+	via, next, timeout := sentInfo(sent)
+	if a.save != nil {
+		a.save(a.phone, sent.PhoneCodeHash)
+	}
+	fmt.Fprintln(a.o.Stderr, CodeHint(via, next, timeout))
+	return a.o.Prompt("Login code", false)
 }
 
 func (a *prompter) Password(ctx context.Context) (string, error) {
@@ -76,6 +125,20 @@ func (a *prompter) AcceptTermsOfService(ctx context.Context, tos tg.HelpTermsOfS
 
 func (a *prompter) SignUp(ctx context.Context) (auth.UserInfo, error) {
 	return auth.UserInfo{}, fmt.Errorf("sign-up is not supported")
+}
+
+func (p *Profile) savePending(phone, hash string) error {
+	pb, _ := json.Marshal(pendingLogin{Phone: phone, Hash: hash, At: time.Now().UTC()})
+	return writeAtomic(p.pendingPath(), pb)
+}
+
+func (p *Profile) readPending(phone string) (pendingLogin, error) {
+	var pend pendingLogin
+	pb, err := os.ReadFile(p.pendingPath())
+	if err != nil || json.Unmarshal(pb, &pend) != nil || pend.Phone != phone {
+		return pend, usagef("no code was requested for %s: run `tgbot user login --phone %s` first", phone, phone)
+	}
+	return pend, nil
 }
 
 // Login signs in and stores the session. If the profile already has a working
@@ -105,6 +168,12 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 		}
 		if err := (&session.Loader{Storage: &fileStorage{path: p.SessionPath()}}).Save(ctx, data); err != nil {
 			return nil, runtimeErr(err)
+		}
+	}
+
+	if o.Resend && o.Prompt == nil && o.Code == "" {
+		if _, err := p.readPending(o.Phone); err != nil {
+			return nil, err
 		}
 	}
 
@@ -146,12 +215,24 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 				return wrapRPC(err)
 			}
 		} else if o.Prompt != nil {
-			flow := auth.NewFlow(&prompter{o: o, phone: o.Phone}, auth.SendCodeOptions{})
+			flow := auth.NewFlow(&prompter{o: o, phone: o.Phone, save: func(ph, h string) { _ = p.savePending(ph, h) }}, auth.SendCodeOptions{})
 			if err := client.Auth().IfNecessary(ctx, flow); err != nil {
 				return wrapRPC(err)
 			}
 		} else if o.Code == "" {
-			sent, err := client.Auth().SendCode(ctx, o.Phone, auth.SendCodeOptions{})
+			var sent tg.AuthSentCodeClass
+			if o.Resend {
+				pend, perr := p.readPending(o.Phone)
+				if perr != nil {
+					return perr
+				}
+				sent, err = client.Auth().ResendCode(ctx, o.Phone, pend.Hash)
+				if tgerr.Is(err, "SEND_CODE_UNAVAILABLE") {
+					return usagef("Telegram has no other way to deliver the code (all methods were used). Wait a few minutes and start over without --resend, or try `--qr` in a terminal")
+				}
+			} else {
+				sent, err = client.Auth().SendCode(ctx, o.Phone, auth.SendCodeOptions{})
+			}
 			if err != nil {
 				return wrapRPC(err)
 			}
@@ -159,18 +240,16 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 			if !ok {
 				return &Error{Kind: KindAuth, Message: "Telegram did not send a code (unexpected response)"}
 			}
-			pb, _ := json.Marshal(pendingLogin{Phone: o.Phone, Hash: s.PhoneCodeHash, At: time.Now().UTC()})
-			if err := writeAtomic(p.pendingPath(), pb); err != nil {
+			if err := p.savePending(o.Phone, s.PhoneCodeHash); err != nil {
 				return runtimeErr(err)
 			}
 			res.CodeSent = true
-			res.CodeVia = strings.ToLower(strings.TrimPrefix(fmt.Sprintf("%T", s.Type), "*tg.AuthSentCodeType"))
+			res.CodeVia, res.CodeNext, res.CodeTimeout = sentInfo(s)
 			return nil
 		} else {
-			pb, err := os.ReadFile(p.pendingPath())
-			var pend pendingLogin
-			if err != nil || json.Unmarshal(pb, &pend) != nil || pend.Phone != o.Phone {
-				return usagef("no code was requested for %s: run `tgbot user login --phone %s` first", o.Phone, o.Phone)
+			pend, perr := p.readPending(o.Phone)
+			if perr != nil {
+				return perr
 			}
 			_, err = client.Auth().SignIn(ctx, o.Phone, strings.TrimSpace(o.Code), pend.Hash)
 			if errors.Is(err, auth.ErrPasswordAuthNeeded) {

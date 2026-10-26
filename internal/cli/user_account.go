@@ -46,7 +46,7 @@ func (a *app) userLoginCmd(uf *userFlags) *cobra.Command {
 		apiID          int
 		apiHash, phone string
 		code, telethon string
-		qr             bool
+		qr, resend     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -71,6 +71,9 @@ Ways to log in:
 No terminal available (for example a tool that cannot type)? Two steps:
   tgbot user login --phone +15551234567            sends the code
   tgbot user login --phone +15551234567 --code 12345
+If the code does not arrive (it is a message from the "Telegram" chat in an app where
+you are already logged in, not an SMS), wait the time shown and ask for another route:
+  tgbot user login --phone +15551234567 --resend
 Set TGBOT_PASSWORD for that one call if the account has a 2-step password.
 The password is never saved.
 
@@ -127,7 +130,7 @@ Use --profile NAME to keep several accounts side by side.`,
 				fmt.Fprintln(a.errOut, "Importing a Telethon session. Stop that Telethon client now: two clients on one session make Telegram revoke it.")
 			}
 			o := mtp.LoginOptions{
-				Options: a.mtpOptions(uf), APIID: apiID, APIHash: apiHash, Phone: phone, Code: code,
+				Options: a.mtpOptions(uf), APIID: apiID, APIHash: apiHash, Phone: phone, Code: code, Resend: resend,
 				Password: a.getenv("TGBOT_PASSWORD"), QR: qr, TelethonSession: telethon, Prompt: prompt,
 			}
 			if qr {
@@ -144,7 +147,7 @@ Use --profile NAME to keep several accounts side by side.`,
 					fmt.Fprintln(a.errOut, q.ToSmallString(false))
 				}
 			}
-			if telethon != "" || code != "" {
+			if telethon != "" || code != "" || resend {
 				o.Prompt = nil
 			}
 			ctx, stop := signalCtx(cmd)
@@ -154,10 +157,16 @@ Use --profile NAME to keep several accounts side by side.`,
 				return a.mtpErr(err)
 			}
 			if res.CodeSent {
-				return a.emitValue(map[string]any{
+				out := map[string]any{
 					"ok": true, "code_sent": true, "via": res.CodeVia,
+					"hint": mtp.CodeHint(res.CodeVia, res.CodeNext, res.CodeTimeout),
 					"next": fmt.Sprintf("tgbot user login --phone %s --code <the code from Telegram>", phone),
-				})
+				}
+				if res.CodeNext != "" {
+					out["resend_via"] = res.CodeNext
+					out["resend_after_seconds"] = res.CodeTimeout
+				}
+				return a.emitValue(out)
 			}
 			return a.emitValue(map[string]any{
 				"ok": true, "already_logged_in": res.AlreadyLoggedIn, "profile": p.Name,
@@ -172,6 +181,7 @@ Use --profile NAME to keep several accounts side by side.`,
 	f.StringVar(&apiHash, "api-hash", "", "api_hash from my.telegram.org (or $TGBOT_API_HASH)")
 	f.StringVar(&phone, "phone", "", "phone number with country code")
 	f.StringVar(&code, "code", "", "login code (second step of the no-terminal login)")
+	f.BoolVar(&resend, "resend", false, "ask Telegram to send the pending code another way (SMS or call); use with --phone")
 	f.BoolVar(&qr, "qr", false, "log in by scanning a QR code")
 	f.StringVar(&telethon, "telethon-session", "", "import a Telethon StringSession (- reads stdin)")
 	return cmd
