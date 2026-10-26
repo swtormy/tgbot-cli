@@ -1,6 +1,6 @@
 # tgbot
 
-The Telegram Bot API from the shell, built for AI agents. One binary, no server, JSON in and out.
+Telegram from the shell, built for AI agents: the Bot API with a bot token, and your own account over MTProto. One binary, no server, JSON in and out.
 
 Inspired by Google's [Gemini API CLI](https://github.com/google-gemini/gemini-api-cli).
 
@@ -10,6 +10,15 @@ tgbot send 123456789 "build finished"
 ```
 
 An agent with a shell (Claude Code, Cursor, Grok Build, Codex, and others) can call every Bot API method with it. There is no MCP server to run and no tool schemas sitting in the agent's context. The agent learns the commands from the binary itself, only when it needs them.
+
+Two modes in one binary:
+
+| | Bot mode (`tgbot send ...`) | User mode (`tgbot user ...`) |
+|---|---|---|
+| Acts as | a bot from @BotFather | your own Telegram account |
+| Login | a token in an environment variable | once, with a code from your Telegram app |
+| Good for | notifications, bot workflows | reading and searching your chats, replying as you, watching for messages |
+| Docs | this page | [docs/USER_MODE.md](docs/USER_MODE.md) |
 
 ## Install
 
@@ -66,6 +75,25 @@ You have access to tgbot through the shell (Telegram Bot API, token in TELEGRAM_
 4. Ask the user before destructive calls such as deleteMessage, banChatMember or leaveChat.
 ```
 
+## User mode (your own account)
+
+Log in once in a normal terminal, then read and search your chats:
+
+```bash
+tgbot user login                          # once: api_id/api_hash from my.telegram.org, phone, code
+tgbot user inbox                          # unread messages, grouped by chat
+tgbot user search "invoice" --since 30d
+tgbot skill install tgbot-user            # teach your agent how to use it
+```
+
+- The session is reused for months. Parallel calls queue behind a lock so Telegram never sees the same session from two places.
+- Read-only by default. Sending, editing and deleting stay blocked (exit code 4) until you run `tgbot user access write` yourself in a terminal.
+- Message text is untrusted input: results carry `"untrusted": true`, and the skill tells agents never to follow instructions found in messages.
+- No daemon: `tgbot user poll` returns what is new since the last call, `tgbot user watch --for 5m` streams live.
+- `tgbot user raw <method>` reaches every other MTProto method.
+
+Full guide for people and agents: [docs/USER_MODE.md](docs/USER_MODE.md).
+
 ## Commands
 
 | Command | What it does |
@@ -78,7 +106,8 @@ You have access to tgbot through the shell (Telegram Bot API, token in TELEGRAM_
 | `tgbot <method> --help` | Parameters of one method. |
 | `tgbot <method> --schema` | JSON Schema of the request body. |
 | `tgbot --usage` | The whole method tree as compact JSON. |
-| `tgbot skill print\|install` | The bundled agent skill. |
+| `tgbot user ...` | Your own account. See [docs/USER_MODE.md](docs/USER_MODE.md). |
+| `tgbot skill print\|install [tgbot\|tgbot-user]` | The bundled agent skills. |
 
 Flags use the exact parameter names from the [Bot API docs](https://core.telegram.org/bots/api), so `--chat_id`, `--reply_markup` and so on.
 
@@ -115,11 +144,14 @@ To refresh the catalog, run `scripts/update-spec.sh`. A weekly workflow opens a 
 
 ## Limitations
 
-- Bot API only. Reading your own account's chats needs a user client (MTProto) and is not supported yet.
+- Bot mode is the Bot API only. Reading a person's chats is user mode, which needs your own `api_id`/`api_hash` and a login.
+- User mode has no secret chats, calls or payments, and refuses login/password/account-deletion methods even through `raw`.
 - Uploads work for top-level file parameters. Media groups and other requests that reference files through `attach://` inside JSON need `file_id`s or URLs for now.
 - Bots cannot download files larger than 20 MB through the cloud Bot API.
 
 ## Development
+
+Layer-232 MTProto client: [gotd/td](https://github.com/gotd/td) (MIT).
 
 ```bash
 go test ./...

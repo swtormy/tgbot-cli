@@ -15,7 +15,7 @@ import (
 	"github.com/swtormy/tgbot-cli/internal/tg"
 )
 
-// Exit codes: 0 ok, 1 runtime/API failure, 2 usage error, 3 token missing or rejected.
+// Exit codes: 0 ok, 1 runtime/API failure, 2 usage error, 3 token or session missing/rejected, 4 blocked by the user-mode access policy.
 const (
 	exitRuntime = 1
 	exitUsage   = 2
@@ -27,6 +27,9 @@ type exitError struct {
 	kind string
 	err  error
 	api  *tg.APIError
+
+	tgCode int            // MTProto error code (user mode)
+	params map[string]any // MTProto error parameters such as retry_after
 }
 
 func (e *exitError) Error() string { return e.err.Error() }
@@ -87,6 +90,12 @@ func (a *app) reportError(err error) int {
 		if len(ee.api.Parameters) > 0 {
 			detail["parameters"] = ee.api.Parameters
 		}
+	}
+	if ee.tgCode != 0 {
+		detail["code"] = ee.tgCode
+	}
+	if len(ee.params) > 0 {
+		detail["parameters"] = ee.params
 	}
 	b, _ := marshal(struct {
 		OK    bool           `json:"ok"`
@@ -188,7 +197,7 @@ func (a *app) rootCmd(args []string) *cobra.Command {
 	pf.DurationVar(&a.timeout, "http-timeout", 30*time.Second, "HTTP timeout per request")
 	root.Flags().BoolVar(&a.usage, "usage", false, "print every method and its parameters as compact JSON")
 
-	root.AddCommand(a.sendCmd(), a.updatesCmd(), a.downloadCmd(), a.methodsCmd(), a.skillCmd())
+	root.AddCommand(a.sendCmd(), a.updatesCmd(), a.downloadCmd(), a.methodsCmd(), a.skillCmd(), a.userCmd())
 	// Method commands are built only when named in the arguments: 185 commands
 	// would clutter --help and slow every start.
 	for _, arg := range args {

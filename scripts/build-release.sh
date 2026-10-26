@@ -22,6 +22,7 @@ for t in $targets; do
     -ldflags "-s -w -X github.com/swtormy/tgbot-cli/internal/cli.Version=${version}" \
     -o "${stage}/${bin}" ./cmd/tgbot
   cp LICENSE NOTICE README.md "$stage/"
+  cp -r docs "$stage/docs"
   if [ "$os" = "windows" ]; then
     if command -v zip >/dev/null; then
       (cd dist && zip -qr "${name}.zip" "$name")
