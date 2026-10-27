@@ -152,7 +152,7 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 	if o.APIID == 0 || o.APIHash == "" {
 		return nil, usagef("api_id and api_hash are required (get them at https://my.telegram.org > API development tools)")
 	}
-	if o.Prompt == nil && o.Phone == "" && o.TelethonSession == "" && o.TgbotSession == "" {
+	if o.Prompt == nil && o.Phone == "" && !o.QR && o.TelethonSession == "" && o.TgbotSession == "" {
 		return nil, usagef("without a terminal, login runs in two steps: `tgbot user login --phone +1555...` sends the code, then add `--code 12345`")
 	}
 	p.Cfg.APIID, p.Cfg.APIHash = o.APIID, o.APIHash
@@ -223,9 +223,15 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 				return nil
 			})
 			if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") {
-				pw, perr := o.Prompt("Two-step verification password (not stored anywhere)", true)
-				if perr != nil {
-					return perr
+				pw := o.Password
+				if pw == "" && o.Prompt != nil {
+					var perr error
+					if pw, perr = o.Prompt("Two-step verification password (not stored anywhere)", true); perr != nil {
+						return perr
+					}
+				}
+				if pw == "" {
+					return usagef("this account has two-step verification: set TGBOT_PASSWORD for this run")
 				}
 				_, err = client.Auth().Password(ctx, pw)
 			}

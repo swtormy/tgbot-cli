@@ -47,6 +47,7 @@ func (a *app) userLoginCmd(uf *userFlags) *cobra.Command {
 		apiHash, phone string
 		code, telethon string
 		importS        string
+		qrFile         string
 		qr, resend     bool
 	)
 	cmd := &cobra.Command{
@@ -155,14 +156,23 @@ Use --profile NAME to keep several accounts side by side.`,
 				Options: a.mtpOptions(uf), APIID: apiID, APIHash: apiHash, Phone: phone, Code: code, Resend: resend,
 				Password: a.getenv("TGBOT_PASSWORD"), QR: qr, TelethonSession: telethon, TgbotSession: importS, Prompt: prompt,
 			}
+			if qrFile != "" {
+				qr = true
+			}
 			if qr {
-				if !interactive {
-					return usageErr("--qr needs a terminal to show the code")
+				if !interactive && qrFile == "" {
+					return usageErr("--qr needs a terminal to show the code (or use --qr-file to write it as an image)")
 				}
 				o.ShowQR = func(url string) {
-					q, err := qrcode.New(url, qrcode.Low)
+					q, err := qrcode.New(url, qrcode.Medium)
 					if err != nil {
 						fmt.Fprintln(a.errOut, url)
+						return
+					}
+					if qrFile != "" {
+						if err := q.WriteFile(320, qrFile); err != nil {
+							fmt.Fprintln(a.errOut, "cannot write", qrFile+":", err)
+						}
 						return
 					}
 					fmt.Fprintln(a.errOut, "\nScan in Telegram > Settings > Devices > Link Desktop Device:")
@@ -204,6 +214,7 @@ Use --profile NAME to keep several accounts side by side.`,
 	f.StringVar(&phone, "phone", "", "phone number with country code")
 	f.StringVar(&code, "code", "", "login code (second step of the no-terminal login)")
 	f.BoolVar(&resend, "resend", false, "ask Telegram to send the pending code another way (SMS or call); use with --phone")
+	f.StringVar(&qrFile, "qr-file", "", "like --qr, but writes the code as a PNG to this path and rewrites it every ~30 s (for showing it in a browser)")
 	f.BoolVar(&qr, "qr", false, "log in by scanning a QR code")
 	f.StringVar(&importS, "import", "", "import a session made by `tgbot user session export` (- reads stdin, or $TGBOT_SESSION)")
 	f.StringVar(&telethon, "telethon-session", "", "import a Telethon StringSession (- reads stdin)")
