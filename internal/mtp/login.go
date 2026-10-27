@@ -2,6 +2,7 @@ package mtp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ type LoginOptions struct {
 	Phone           string
 	QR              bool
 	TelethonSession string
+	TgbotSession    string // bundle made by `tgbot user session export`
 	Code            string // non-interactive step 2
 	Resend          bool   // ask Telegram to deliver the pending code another way (SMS or call)
 	Password        string // 2FA password, only for this call
@@ -94,7 +96,7 @@ func CodeHint(via, next string, timeout int) string {
 	if next != "" {
 		h += fmt.Sprintf(" If nothing arrives, wait %ds and run the same command with --resend to get it by %s.", timeout, next)
 	} else if via == "app" {
-		h += " Telegram offers no other delivery. If the message never shows up (Telegram sometimes delivers nothing to third-party clients), log in with `tgbot user login --qr` in a terminal and scan it from Settings > Devices > Link Desktop Device."
+		h += " Telegram offers no other delivery. If the message never shows up (Telegram sometimes delivers nothing to third-party clients), log in on a computer with a terminal: `tgbot user login --qr` (scan from Settings > Devices > Link Desktop Device), then move the session here with `tgbot user session export` and `tgbot user login --import -`."
 	}
 	return h
 }
@@ -150,7 +152,7 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 	if o.APIID == 0 || o.APIHash == "" {
 		return nil, usagef("api_id and api_hash are required (get them at https://my.telegram.org > API development tools)")
 	}
-	if o.Prompt == nil && o.Phone == "" && o.TelethonSession == "" {
+	if o.Prompt == nil && o.Phone == "" && o.TelethonSession == "" && o.TgbotSession == "" {
 		return nil, usagef("without a terminal, login runs in two steps: `tgbot user login --phone +1555...` sends the code, then add `--code 12345`")
 	}
 	p.Cfg.APIID, p.Cfg.APIHash = o.APIID, o.APIHash
@@ -173,6 +175,20 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 		}
 	}
 
+	if o.TgbotSession != "" {
+		_, data, err := ParseSessionBundle(o.TgbotSession)
+		if err != nil {
+			return nil, err
+		}
+		if p.Exists() {
+			return nil, usagef("profile %q already has a session; use another --profile or run `tgbot user logout` first", p.Name)
+		}
+		if err := (&fileStorage{path: p.SessionPath()}).StoreSession(ctx, data); err != nil {
+			return nil, runtimeErr(err)
+		}
+	}
+	imported := o.TelethonSession != "" || o.TgbotSession != ""
+
 	if o.Resend && o.Prompt == nil && o.Code == "" {
 		if _, err := p.readPending(o.Phone); err != nil {
 			return nil, err
@@ -191,11 +207,11 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 			return wrapRPC(err)
 		}
 		if st.Authorized {
-			res.AlreadyLoggedIn, res.Self = o.TelethonSession == "", st.User
+			res.AlreadyLoggedIn, res.Self = !imported, st.User
 			return nil
 		}
-		if o.TelethonSession != "" {
-			return &Error{Kind: KindAuth, Message: "Telegram does not accept this Telethon session (it was logged out or revoked)"}
+		if imported {
+			return &Error{Kind: KindAuth, Message: "Telegram does not accept the imported session (it was logged out or revoked, or it is in use elsewhere)"}
 		}
 		if o.QR {
 			if o.ShowQR == nil {
@@ -346,4 +362,33 @@ func (c *Conn) Status(ctx context.Context) (map[string]any, error) {
 	}
 	out["other_sessions"] = len(res.Authorizations) - 1
 	return out, nil
+}
+
+const bundlePrefix = "tgbot1:"
+
+type sessionBundle struct {
+	APIID   int    `json:"api_id"`
+	Session []byte `json:"session"`
+}
+
+// ExportSession packs the stored session so it can be moved to another machine.
+// Whoever holds the string has full access to the account.
+func (p *Profile) ExportSession() (string, error) {
+	data, err := (&fileStorage{path: p.SessionPath()}).LoadSession(context.Background())
+	if err != nil {
+		return "", &Error{Kind: KindAuth, Message: fmt.Sprintf("no session for profile %q: log in first", p.Name)}
+	}
+	b, _ := json.Marshal(sessionBundle{APIID: p.Cfg.APIID, Session: data})
+	return bundlePrefix + base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// ParseSessionBundle unpacks the output of ExportSession.
+func ParseSessionBundle(s string) (apiID int, data []byte, err error) {
+	s = strings.TrimSpace(s)
+	raw, derr := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(s, bundlePrefix))
+	var b sessionBundle
+	if !strings.HasPrefix(s, bundlePrefix) || derr != nil || json.Unmarshal(raw, &b) != nil || len(b.Session) == 0 {
+		return 0, nil, usagef("not a tgbot session string (it starts with %q and comes from `tgbot user session export`)", bundlePrefix)
+	}
+	return b.APIID, b.Session, nil
 }

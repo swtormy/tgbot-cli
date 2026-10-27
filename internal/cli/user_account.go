@@ -46,6 +46,7 @@ func (a *app) userLoginCmd(uf *userFlags) *cobra.Command {
 		apiID          int
 		apiHash, phone string
 		code, telethon string
+		importS        string
 		qr, resend     bool
 	)
 	cmd := &cobra.Command{
@@ -64,6 +65,7 @@ Ways to log in:
   tgbot user login                     asks for phone, code and 2-step password
   tgbot user login --qr                shows a QR code: scan it in Telegram >
                                        Settings > Devices > Link Desktop Device
+  tgbot user login --import -             move a session from another machine (see: tgbot user session export)
   tgbot user login --telethon-session -   import a Telethon StringSession from stdin
                                        (stop using it in Telethon afterwards, or
                                        Telegram will revoke both)
@@ -126,12 +128,32 @@ Use --profile NAME to keep several accounts side by side.`,
 			if telethon == "" {
 				telethon = a.getenv("TGBOT_TELETHON_SESSION")
 			}
+			if importS == "-" {
+				t, err := a.readStdin()
+				if err != nil {
+					return err
+				}
+				importS = strings.TrimSpace(t)
+			}
+			if importS == "" {
+				importS = a.getenv("TGBOT_SESSION")
+			}
+			if importS != "" {
+				id, _, perr := mtp.ParseSessionBundle(importS)
+				if perr != nil {
+					return a.mtpErr(perr)
+				}
+				if apiID == 0 {
+					apiID = id
+				}
+				fmt.Fprintln(a.errOut, "Importing a tgbot session. Do not use the original place any more: two places on one session make Telegram revoke it.")
+			}
 			if telethon != "" {
 				fmt.Fprintln(a.errOut, "Importing a Telethon session. Stop that Telethon client now: two clients on one session make Telegram revoke it.")
 			}
 			o := mtp.LoginOptions{
 				Options: a.mtpOptions(uf), APIID: apiID, APIHash: apiHash, Phone: phone, Code: code, Resend: resend,
-				Password: a.getenv("TGBOT_PASSWORD"), QR: qr, TelethonSession: telethon, Prompt: prompt,
+				Password: a.getenv("TGBOT_PASSWORD"), QR: qr, TelethonSession: telethon, TgbotSession: importS, Prompt: prompt,
 			}
 			if qr {
 				if !interactive {
@@ -147,7 +169,7 @@ Use --profile NAME to keep several accounts side by side.`,
 					fmt.Fprintln(a.errOut, q.ToSmallString(false))
 				}
 			}
-			if telethon != "" || code != "" || resend {
+			if telethon != "" || importS != "" || code != "" || resend {
 				o.Prompt = nil
 			}
 			ctx, stop := signalCtx(cmd)
@@ -183,6 +205,7 @@ Use --profile NAME to keep several accounts side by side.`,
 	f.StringVar(&code, "code", "", "login code (second step of the no-terminal login)")
 	f.BoolVar(&resend, "resend", false, "ask Telegram to send the pending code another way (SMS or call); use with --phone")
 	f.BoolVar(&qr, "qr", false, "log in by scanning a QR code")
+	f.StringVar(&importS, "import", "", "import a session made by `tgbot user session export` (- reads stdin, or $TGBOT_SESSION)")
 	f.StringVar(&telethon, "telethon-session", "", "import a Telethon StringSession (- reads stdin)")
 	return cmd
 }
@@ -342,4 +365,44 @@ func (a *app) userProfilesCmd(uf *userFlags) *cobra.Command {
 			return a.emitValue(out)
 		},
 	}
+}
+
+func (a *app) userSessionCmd(uf *userFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "session",
+		Short: "Move a logged-in session to another machine",
+		Long: `Log in once on a computer where you have a terminal and a phone (for example
+with ` + "`tgbot user login --qr`" + `), then move the session to the place where the agent runs:
+
+  tgbot user session export                  # on the computer you logged in on
+  tgbot user login --import -                # on the agent's machine: paste the string, then Ctrl-D
+  (or set TGBOT_SESSION=... and run tgbot user login --import "")
+
+The string is full access to the account: treat it like a password. After the
+move use the session in ONE place only, otherwise Telegram revokes it
+(AUTH_KEY_DUPLICATED). Delete the local profile on the source machine
+(` + "`tgbot user logout --local`" + `) so it is not used by accident.`,
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "export",
+		Short: "Print the session as one string (needs a terminal, secret)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !isTerminal(a.in) {
+				return &exitError{code: exitBlocked, kind: "blocked", err: fmt.Errorf("session export needs an interactive terminal; ask the user to run it")}
+			}
+			p, err := a.profileFor(uf, true)
+			if err != nil {
+				return err
+			}
+			s, err := p.ExportSession()
+			if err != nil {
+				return a.mtpErr(err)
+			}
+			fmt.Fprintln(a.errOut, "This string is full access to the account. Do not paste it anywhere you would not paste a password.")
+			fmt.Fprintln(a.out, s)
+			return nil
+		},
+	})
+	return cmd
 }

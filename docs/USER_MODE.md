@@ -34,7 +34,22 @@ Read this page once, then log in once. After that, humans and agents just run co
    tgbot user login --phone +15551234567 --code 12345         # TGBOT_PASSWORD=... too, if you have 2FA
    ```
 
-   The first command prints `via`, `hint`, and, when Telegram has a fallback, `resend_via` and `resend_after_seconds`. `"via":"app"` means the code is a message from the **Telegram** service chat in a Telegram app that is already logged in to this account (not an SMS). No such app, or nothing arrived? Wait `resend_after_seconds`, then run `tgbot user login --phone +15551234567 --resend` to get the code by SMS or a call. No `resend_via` at all means Telegram offers no second route, and since early 2026 it sometimes delivers nothing to third-party clients even though `auth.sendCode` succeeded (a Telegram-side behaviour, same for Telethon and Pyrogram; official apps and my.telegram.org are unaffected). Use `tgbot user login --qr` in a terminal instead: it needs no code. A Telethon session made on a machine that did receive a code can also be imported (`--telethon-session`).
+   The first command prints `via`, `hint`, and, when Telegram has a fallback, `resend_via` and `resend_after_seconds`. `"via":"app"` means the code is a message from the **Telegram** service chat in a Telegram app that is already logged in to this account (not an SMS). No such app, or nothing arrived? Wait `resend_after_seconds`, then run `tgbot user login --phone +15551234567 --resend` to get the code by SMS or a call. No `resend_via` at all means Telegram offers no second route, and since early 2026 it sometimes delivers nothing to third-party clients even though `auth.sendCode` succeeded (a Telegram-side behaviour, same for Telethon and Pyrogram; official apps and my.telegram.org are unaffected). Use `tgbot user login --qr` on a computer with a terminal instead: it needs no code. If the agent runs elsewhere, move the session with `tgbot user session export` / `login --import` (see Setup). A Telethon session made on a machine that did receive a code can also be imported (`--telethon-session`).
+
+   **The agent runs somewhere you have no terminal (sandbox, remote server)?** Log in once on your own computer, then move the session:
+
+   ```bash
+   # on your computer (terminal + phone): QR needs no code
+   tgbot user login --qr
+   tgbot user session export > session.txt      # one line starting with tgbot1:  (full access to the account, treat as a password)
+   tgbot user logout --local                    # forget it here, so the session is used in one place only
+
+   # where the agent runs
+   TGBOT_API_ID=... TGBOT_API_HASH=... tgbot user login --import -   # paste the line, then Ctrl-D
+   # or set TGBOT_SESSION=<line> and run: tgbot user login --import ""
+   ```
+
+   Use the same `api_id`/`api_hash` on both sides. Never use one session from two places at once (Telegram revokes it with AUTH_KEY_DUPLICATED). Delete `session.txt` afterwards. `session export` needs a terminal, so an agent cannot print it.
 
 3. Check: `tgbot user status` prints your name, the access level and when an idle session would expire.
 4. Install the agent skill: `tgbot skill install tgbot-user` (add `--global` for all projects, `--agent cursor` or `--agent grok` for other tools).

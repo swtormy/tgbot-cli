@@ -318,3 +318,28 @@ func TestCodeKindAndHint(t *testing.T) {
 		t.Errorf("sms hint = %q", h)
 	}
 }
+
+func TestSessionBundleRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	p, _ := NewProfile(home, "a")
+	p.Cfg.APIID = 777
+	if err := os.MkdirAll(p.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.SessionPath(), []byte(`{"Version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := p.ExportSession()
+	if err != nil || !strings.HasPrefix(s, "tgbot1:") {
+		t.Fatalf("export: %q %v", s, err)
+	}
+	id, data, err := ParseSessionBundle(" " + s + "\n")
+	if err != nil || id != 777 || string(data) != `{"Version":1}` {
+		t.Fatalf("parse: %d %q %v", id, data, err)
+	}
+	for _, bad := range []string{"", "tgbot1:", "tgbot1:!!!", "hello"} {
+		if _, _, err := ParseSessionBundle(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}

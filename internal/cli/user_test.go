@@ -215,3 +215,15 @@ func TestLoginResendNeedsAPendingCode(t *testing.T) {
 		t.Fatalf("exit %d err %s", r.code, r.err)
 	}
 }
+
+func TestSessionExportNeedsTerminalAndImportRejectsJunk(t *testing.T) {
+	env := map[string]string{"TGBOT_HOME": t.TempDir()}
+	r := run(t, env, "", "user", "session", "export")
+	if r.code != exitBlocked {
+		t.Fatalf("export without terminal: exit %d %s", r.code, r.err)
+	}
+	r = run(t, env, "", "user", "login", "--api-id", "1", "--api-hash", "x", "--import", "junk")
+	if r.code != 2 || !strings.Contains(r.err, "not a tgbot session string") {
+		t.Fatalf("exit %d err %s", r.code, r.err)
+	}
+}

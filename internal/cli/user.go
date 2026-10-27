@@ -64,7 +64,7 @@ func (a *app) userCmd() *cobra.Command {
 	pf.StringVar(&uf.proxy, "proxy", "", "socks5://host:port (or http://host:port with websocket); or $TGBOT_PROXY")
 	pf.DurationVar(&uf.connectTimeout, "connect-timeout", 20*time.Second, "give up on one transport after this long")
 	cmd.AddCommand(
-		a.userLoginCmd(uf), a.userLogoutCmd(uf), a.userStatusCmd(uf), a.userAccessCmd(uf), a.userProfilesCmd(uf),
+		a.userLoginCmd(uf), a.userLogoutCmd(uf), a.userSessionCmd(uf), a.userStatusCmd(uf), a.userAccessCmd(uf), a.userProfilesCmd(uf),
 		a.userDialogsCmd(uf), a.userHistoryCmd(uf), a.userSearchCmd(uf), a.userInboxCmd(uf), a.userPollCmd(uf),
 		a.userWatchCmd(uf), a.userInfoCmd(uf), a.userDownloadCmd(uf),
 		a.userSendCmd(uf), a.userEditCmd(uf), a.userDeleteCmd(uf), a.userForwardCmd(uf), a.userReadCmd(uf),
