@@ -7,6 +7,7 @@ Read this page once, then log in once. After that, humans and agents just run co
 ## Contents
 
 1. [Set up in 4 steps](#set-up-in-4-steps)
+   - [Login needs a human: known problems](#login-needs-a-human-known-problems)
 2. [What you can do](#what-you-can-do)
 3. [Keeping the session alive](#keeping-the-session-alive)
 4. [Safety model](#safety-model)
@@ -55,6 +56,25 @@ Read this page once, then log in once. After that, humans and agents just run co
 4. Install the agent skill: `tgbot skill install tgbot-user` (add `--global` for all projects, `--agent cursor` or `--agent grok` for other tools).
 
 Use a spare or secondary account while you try it out.
+
+## Login needs a human: known problems
+
+The first login cannot be done by an agent, and it does not always work the obvious way. These are the failures seen in real use, in the order people hit them:
+
+| What you see | Why | What works |
+|---|---|---|
+| `login` without arguments fails: "needs a terminal" | The password-like steps (code, 2FA password) must be typed by the person. An agent's shell has no terminal. | Run `tgbot user login` yourself in a normal terminal, or use the two-step `--phone` / `--code` form. |
+| `code_sent: true`, `via: "app"`, but no code arrives. `--resend` says `SEND_CODE_UNAVAILABLE`. No `resend_via` field. | Telegram accepted the request but delivers third-party logins only into an already logged-in Telegram app, never by SMS, and since 2026 sometimes delivers nothing at all. This is Telegram's behaviour, identical in Telethon and Pyrogram. The official apps and my.telegram.org are not affected. Our request is the same as theirs, so retrying does not help. | Use a QR login: `tgbot user login --qr` in a terminal on any computer, scan it from Telegram > Settings > Devices > Link Desktop Device. It needs no code. |
+| `--qr` says it needs a terminal | The QR is drawn as text and refreshes every 30 s, so a person has to look at it. | Run it in a terminal you can see, or write it as an image with `--qr-file path.png` (rewritten every ~30 s) and show that file in a browser or viewer. |
+| The agent runs in a sandbox or on a server you do not want to log in to | Login and the agent are in different places. | Log in once where you have a terminal and phone, then move the session: `tgbot user session export` there, `tgbot user login --import -` in the sandbox. |
+| "cannot reach Telegram" after ~40 s | The network passes TCP but drops Telegram's protocol. | See [Restricted networks](#restricted-networks). |
+
+Rules that follow from this:
+
+- **Plan for one human step.** Whoever sets up the agent must be at a terminal with the phone in hand for a few minutes, once. After that the session lasts months and agents run commands without them.
+- **Never hand an agent your `api_hash`, login code, 2FA password or session string in chat.** Put them in environment variables or a file only your user can read (`chmod 600`), and let the human run `login`.
+- **Use one session in one place.** After `session export`, stop using the original (`tgbot user logout --local` deletes only the local copy). Two places on one session make Telegram revoke it.
+- **Agents must not try to work around a failed login.** Report the JSON output (`via`, `hint`, `resend_via`, `resend_after_seconds`) to the user and stop.
 
 ## What you can do
 

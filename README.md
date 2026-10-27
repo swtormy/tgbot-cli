@@ -92,6 +92,8 @@ tgbot skill install tgbot-user            # teach your agent how to use it
 - No daemon: `tgbot user poll` returns what is new since the last call, `tgbot user watch --for 5m` streams live.
 - `tgbot user raw <method>` reaches every other MTProto method.
 
+**Login is the one step that needs you.** Telegram delivers third-party login codes only into an already logged-in app, and sometimes nothing at all. If no code arrives, use `tgbot user login --qr` in a terminal and scan it. To run the agent somewhere without a terminal, log in on your computer and move the session with `tgbot user session export` / `tgbot user login --import -`. Details and the full list of known failures: [Login needs a human](docs/USER_MODE.md#login-needs-a-human-known-problems).
+
 Full guide for people and agents: [docs/USER_MODE.md](docs/USER_MODE.md).
 
 ## Commands
