@@ -93,6 +93,8 @@ func CodeHint(via, next string, timeout int) string {
 	}
 	if next != "" {
 		h += fmt.Sprintf(" If nothing arrives, wait %ds and run the same command with --resend to get it by %s.", timeout, next)
+	} else if via == "app" {
+		h += " Telegram offers no other delivery. If the message never shows up (Telegram sometimes delivers nothing to third-party clients), log in with `tgbot user login --qr` in a terminal and scan it from Settings > Devices > Link Desktop Device."
 	}
 	return h
 }

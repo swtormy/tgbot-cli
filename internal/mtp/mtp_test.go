@@ -311,6 +311,9 @@ func TestCodeKindAndHint(t *testing.T) {
 			t.Errorf("hint %q lacks %q", h, want)
 		}
 	}
+	if h := CodeHint("app", "", 0); !strings.Contains(h, "--qr") {
+		t.Errorf("app hint without fallback = %q", h)
+	}
 	if h := CodeHint("sms", "", 0); !strings.Contains(h, "SMS") || strings.Contains(h, "--resend") {
 		t.Errorf("sms hint = %q", h)
 	}
