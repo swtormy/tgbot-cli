@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
@@ -49,6 +50,7 @@ func (a *app) userLoginCmd(uf *userFlags) *cobra.Command {
 		importS        string
 		qrFile         string
 		qr, resend     bool
+		reset          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -66,6 +68,11 @@ Ways to log in:
   tgbot user login                     asks for phone, code and 2-step password
   tgbot user login --qr                shows a QR code: scan it in Telegram >
                                        Settings > Devices > Link Desktop Device
+  tgbot user login --qr-file /tmp/q.png   same, no terminal needed: writes a PNG
+                                       (fresh every ~30 s, expiry in /tmp/q.png.json).
+                                       Set TGBOT_PASSWORD first if the account has 2-step
+                                       verification. An expired QR opens desktop.telegram.org.
+  tgbot user login --reset             drop an unfinished login (never a finished session)
   tgbot user login --import -             move a session from another machine (see: tgbot user session export)
   tgbot user login --telethon-session -   import a Telethon StringSession from stdin
                                        (stop using it in Telethon afterwards, or
@@ -152,31 +159,36 @@ Use --profile NAME to keep several accounts side by side.`,
 			if telethon != "" {
 				fmt.Fprintln(a.errOut, "Importing a Telethon session. Stop that Telethon client now: two clients on one session make Telegram revoke it.")
 			}
+			if qrFile != "" {
+				qr = true
+			}
+			if qr && !interactive && qrFile == "" {
+				return usageErr("--qr needs a terminal to draw the code. Without one use --qr-file PATH (writes a PNG that you show on another screen), e.g. `tgbot user login --qr-file /tmp/tgbot-qr.png`")
+			}
 			o := mtp.LoginOptions{
 				Options: a.mtpOptions(uf), APIID: apiID, APIHash: apiHash, Phone: phone, Code: code, Resend: resend,
 				Password: a.getenv("TGBOT_PASSWORD"), QR: qr, TelethonSession: telethon, TgbotSession: importS, Prompt: prompt,
 			}
-			if qrFile != "" {
-				qr = true
-			}
 			if qr {
-				if !interactive && qrFile == "" {
-					return usageErr("--qr needs a terminal to show the code (or use --qr-file to write it as an image)")
-				}
-				o.ShowQR = func(url string) {
+				o.ShowQR = func(url string, expires time.Time) {
 					q, err := qrcode.New(url, qrcode.Medium)
 					if err != nil {
 						fmt.Fprintln(a.errOut, url)
 						return
 					}
+					left := time.Until(expires).Round(time.Second)
 					if qrFile != "" {
-						if err := q.WriteFile(320, qrFile); err != nil {
+						if err := writeQRFile(q, qrFile, expires); err != nil {
 							fmt.Fprintln(a.errOut, "cannot write", qrFile+":", err)
+							return
 						}
-						return
+						fmt.Fprintf(a.errOut, "QR written to %s, valid until %s UTC (~%ds). Show it right now and scan it from Telegram > Settings > Devices > Link Desktop Device. An expired code does not log in: it opens desktop.telegram.org instead. The file is rewritten about every 30 s; %s.json holds the expiry.\n",
+							qrFile, expires.UTC().Format("15:04:05"), int(left.Seconds()), qrFile)
 					}
-					fmt.Fprintln(a.errOut, "\nScan in Telegram > Settings > Devices > Link Desktop Device:")
-					fmt.Fprintln(a.errOut, q.ToSmallString(false))
+					if interactive {
+						fmt.Fprintln(a.errOut, "\nScan in Telegram > Settings > Devices > Link Desktop Device:")
+						fmt.Fprintln(a.errOut, q.ToSmallString(false))
+					}
 				}
 			}
 			if telethon != "" || importS != "" || code != "" || resend {
@@ -184,6 +196,12 @@ Use --profile NAME to keep several accounts side by side.`,
 			}
 			ctx, stop := signalCtx(cmd)
 			defer stop()
+			if reset {
+				if err := p.ResetLogin(ctx, 10*time.Second); err != nil {
+					return a.mtpErr(err)
+				}
+				return a.emitValue(map[string]any{"ok": true, "reset": true, "next": "Start the login again. If a half-made session shows in Telegram > Settings > Devices, end it there."})
+			}
 			res, err := p.Login(ctx, o)
 			if err != nil {
 				return a.mtpErr(err)
@@ -214,8 +232,9 @@ Use --profile NAME to keep several accounts side by side.`,
 	f.StringVar(&phone, "phone", "", "phone number with country code")
 	f.StringVar(&code, "code", "", "login code (second step of the no-terminal login)")
 	f.BoolVar(&resend, "resend", false, "ask Telegram to send the pending code another way (SMS or call); use with --phone")
-	f.StringVar(&qrFile, "qr-file", "", "like --qr, but writes the code as a PNG to this path and rewrites it every ~30 s (for showing it in a browser)")
-	f.BoolVar(&qr, "qr", false, "log in by scanning a QR code")
+	f.StringVar(&qrFile, "qr-file", "", "QR login without a terminal: writes the code as a PNG to this path (implies --qr), rewrites it about every 30 s, and PATH.json holds expires_at")
+	f.BoolVar(&qr, "qr", false, "log in by scanning a QR code (draws it in the terminal)")
+	f.BoolVar(&reset, "reset", false, "throw away an unfinished login (pending code, or a scan waiting for the 2FA password) and start clean; never touches a finished session")
 	f.StringVar(&importS, "import", "", "import a session made by `tgbot user session export` (- reads stdin, or $TGBOT_SESSION)")
 	f.StringVar(&telethon, "telethon-session", "", "import a Telethon StringSession (- reads stdin)")
 	return cmd
@@ -416,4 +435,29 @@ move use the session in ONE place only, otherwise Telegram revokes it
 		},
 	})
 	return cmd
+}
+
+// writeQRFile replaces the PNG atomically (a reader never sees a half-written
+// image) and records when the code stops being valid.
+func writeQRFile(q *qrcode.QRCode, path string, expires time.Time) error {
+	png, err := q.PNG(320)
+	if err != nil {
+		return err
+	}
+	if err := replaceFile(path, png); err != nil {
+		return err
+	}
+	meta, _ := json.Marshal(map[string]any{
+		"expires_at": expires.UTC().Format(time.RFC3339), "refreshed_at": time.Now().UTC().Format(time.RFC3339),
+		"valid_seconds": int(time.Until(expires).Seconds()),
+	})
+	return replaceFile(path+".json", meta)
+}
+
+func replaceFile(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

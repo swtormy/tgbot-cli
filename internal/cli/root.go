@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -45,6 +47,44 @@ func runtimeErr(err error) error {
 // Version is set at build time.
 var Version = "dev"
 
+// versionString names the build even when no -ldflags version was given, so a
+// stale binary can be told apart from a fresh one.
+func versionString() string {
+	v := Version
+	if v != "dev" {
+		return v
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		rev, dirty := "", ""
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				if s.Value == "true" {
+					dirty = "+dirty"
+				}
+			}
+		}
+		if len(rev) > 7 {
+			rev = rev[:7]
+		}
+		if rev != "" {
+			return "dev-" + rev + dirty
+		}
+	}
+	return v
+}
+
+// staleHint explains unknown flags and commands: an old binary is the usual cause.
+func staleHint(err error) string {
+	m := err.Error()
+	if strings.Contains(m, "unknown flag") || strings.Contains(m, "unknown command") || strings.Contains(m, "unknown shorthand") {
+		return fmt.Sprintf(" (this is tgbot %s; if the docs mention it, the binary is probably stale: update with `go install github.com/swtormy/tgbot-cli/cmd/tgbot@main` or `git pull && go build ./cmd/tgbot`)", versionString())
+	}
+	return ""
+}
+
 type app struct {
 	spec    *spec.Spec
 	in      io.Reader
@@ -73,6 +113,9 @@ func Execute(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv fu
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
+		if _, ok := err.(*exitError); !ok {
+			err = usageErr("%s%s", err, staleHint(err))
+		}
 		return a.reportError(err)
 	}
 	return 0
@@ -174,7 +217,7 @@ func (a *app) rootCmd(args []string) *cobra.Command {
 		Use:           "tgbot",
 		Short:         "Telegram Bot API from the shell, built for AI agents",
 		Long:          rootLong,
-		Version:       Version,
+		Version:       versionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -187,7 +230,7 @@ func (a *app) rootCmd(args []string) *cobra.Command {
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
-		return usageErr("%s", err)
+		return usageErr("%s%s", err, staleHint(err))
 	})
 	pf := root.PersistentFlags()
 	pf.BoolVar(&a.dryRun, "dry-run", false, "validate input and print the request instead of sending it (needs no token)")

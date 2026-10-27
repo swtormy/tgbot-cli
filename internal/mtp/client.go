@@ -63,13 +63,22 @@ func (p *Profile) lock(ctx context.Context, timeout time.Duration) (func(), erro
 		return nil, runtimeErr(err)
 	}
 	fl := flock.New(p.LockPath())
-	lctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	ok, err := fl.TryLockContext(lctx, 200*time.Millisecond)
+	ok, err := fl.TryLock()
+	if err == nil && !ok {
+		if r, running := p.loginRunningInfo(); running {
+			return nil, &Error{Kind: KindRuntime, Params: map[string]any{"login_in_progress": true, "mode": r.Mode}, Message: fmt.Sprintf(
+				"a login is in progress for profile %q (%s, started %s ago). Finish it (scan the QR / enter the password) or stop it with Ctrl-C, then retry",
+				p.Name, r.Mode, time.Since(r.Started).Round(time.Second))}
+		}
+		lctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		ok, err = fl.TryLockContext(lctx, 200*time.Millisecond)
+	}
 	if err != nil || !ok {
 		return nil, &Error{Kind: KindRuntime, Message: fmt.Sprintf(
 			"another tgbot user command has held profile %q for %s; wait for it to finish", p.Name, timeout)}
 	}
+	_ = os.Remove(p.runningPath()) // we hold the lock, so a leftover marker is stale
 	return func() { _ = fl.Unlock() }, nil
 }
 
@@ -141,7 +150,10 @@ func (p *Profile) openWith(ctx context.Context, o Options, handler telegram.Upda
 			return wrapRPC(err)
 		}
 		if !st.Authorized {
-			return &Error{Kind: KindAuth, Message: "the stored session is not authorized any more. Run `tgbot user login` again."}
+			if p.LoginState() == stateAwaiting2FA {
+				return &Error{Kind: KindAuth, Message: "login is not finished: the QR scan was accepted but the account has two-step verification. Set TGBOT_PASSWORD and run `tgbot user login --qr-file ...` again (no new scan is needed), or start over with `tgbot user login --reset`."}
+			}
+			return &Error{Kind: KindAuth, Message: "the stored session is not authorized any more. Run `tgbot user login` again (after an unfinished or failed login: `tgbot user login --reset` first)."}
 		}
 		inner = fn(ctx, &Conn{API: client.API(), Self: st.User, Profile: p, Peers: peers, Client: client})
 		return nil

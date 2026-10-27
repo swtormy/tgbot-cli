@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/session"
@@ -342,4 +343,57 @@ func TestSessionBundleRoundTrip(t *testing.T) {
 			t.Errorf("accepted %q", bad)
 		}
 	}
+}
+
+func TestResetLoginOnlyTouchesUnfinishedLogins(t *testing.T) {
+	p, _ := NewProfile(t.TempDir(), "a")
+	if err := os.MkdirAll(p.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := p.ResetLogin(ctx, time.Second); err == nil || !strings.Contains(err.Error(), "nothing to reset") {
+		t.Fatalf("clean profile: %v", err)
+	}
+	_ = os.WriteFile(p.SessionPath(), []byte("{}"), 0o600)
+	_ = os.WriteFile(p.pendingPath(), []byte("{}"), 0o600)
+	if err := p.ResetLogin(ctx, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.SessionPath()); err != nil {
+		t.Fatal("a pending code reset must keep the session file")
+	}
+	_ = p.setLoginState(stateAwaiting2FA)
+	if p.LoginState() != stateAwaiting2FA {
+		t.Fatal("state not stored")
+	}
+	if err := p.ResetLogin(ctx, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.SessionPath()); err == nil || p.LoginState() != "" {
+		t.Fatal("awaiting_2fa reset must drop the half-made session and the state")
+	}
+}
+
+func TestLockFailsFastWhileALoginRuns(t *testing.T) {
+	p, _ := NewProfile(t.TempDir(), "a")
+	ctx := context.Background()
+	unlock, err := p.lock(ctx, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.markLoginRunning(LoginOptions{QR: true})
+	start := time.Now()
+	_, err = p.lock(ctx, 30*time.Second)
+	var me *Error
+	if !errors.As(err, &me) || me.Params["login_in_progress"] != true || time.Since(start) > 5*time.Second {
+		t.Fatalf("want fast login_in_progress error, got %v after %s", err, time.Since(start))
+	}
+	unlock()
+	p.clearLoginRunning()
+
+	unlock, err = p.lock(ctx, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
 }

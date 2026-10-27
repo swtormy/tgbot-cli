@@ -8,6 +8,7 @@ Read this page once, then log in once. After that, humans and agents just run co
 
 1. [Set up in 4 steps](#set-up-in-4-steps)
    - [Login needs a human: known problems](#login-needs-a-human-known-problems)
+   - [Phone-only owner, headless agent](#phone-only-owner-headless-agent)
 2. [What you can do](#what-you-can-do)
 3. [Keeping the session alive](#keeping-the-session-alive)
 4. [Safety model](#safety-model)
@@ -59,22 +60,54 @@ Use a spare or secondary account while you try it out.
 
 ## Login needs a human: known problems
 
-The first login cannot be done by an agent, and it does not always work the obvious way. These are the failures seen in real use, in the order people hit them:
+The first login needs a person with the phone in hand, once. It does not always work the obvious way. These are the failures seen in real use, in the order people hit them:
 
 | What you see | Why | What works |
 |---|---|---|
-| `login` without arguments fails: "needs a terminal" | The password-like steps (code, 2FA password) must be typed by the person. An agent's shell has no terminal. | Run `tgbot user login` yourself in a normal terminal, or use the two-step `--phone` / `--code` form. |
-| `code_sent: true`, `via: "app"`, but no code arrives. `--resend` says `SEND_CODE_UNAVAILABLE`. No `resend_via` field. | Telegram accepted the request but delivers third-party logins only into an already logged-in Telegram app, never by SMS, and since 2026 sometimes delivers nothing at all. This is Telegram's behaviour, identical in Telethon and Pyrogram. The official apps and my.telegram.org are not affected. Our request is the same as theirs, so retrying does not help. | Use a QR login: `tgbot user login --qr` in a terminal on any computer, scan it from Telegram > Settings > Devices > Link Desktop Device. It needs no code. |
-| `--qr` says it needs a terminal | The QR is drawn as text and refreshes every 30 s, so a person has to look at it. | Run it in a terminal you can see, or write it as an image with `--qr-file path.png` (rewritten every ~30 s) and show that file in a browser or viewer. |
+| `login` without arguments fails: "needs a terminal" | The code and the 2FA password must be typed by the person. An agent's shell has no terminal. | Run `tgbot user login` yourself in a normal terminal, or use the QR login (below). |
+| `code_sent: true`, `via: "app"`, but no code arrives. `--resend` says no other way / `SEND_CODE_UNAVAILABLE`. No `resend_via` field. | Telegram accepted the request but delivers third-party logins only into an already logged-in Telegram app, never by SMS, and since 2026 sometimes delivers nothing at all. This is Telegram's behaviour, identical in Telethon and Pyrogram. The official apps and my.telegram.org are not affected. Our request is the same as theirs, so retrying does not help. **Do not loop on `--resend`.** | Use the QR login: `tgbot user login --qr` in a terminal, or `--qr-file` without one. It needs no code. |
+| `--qr` says it needs a terminal | `--qr` draws the code as text. | `tgbot user login --qr-file /tmp/tgbot-qr.png`. It works with no terminal at all (`--qr-file` implies `--qr`). |
+| The QR was sent through a chat and scanning it opens `desktop.telegram.org` | The code lives about 30 s. An expired code is no longer a login link, so the phone treats it as a plain "get Telegram Desktop" link. It is not a bug and not a phishing page. | Send a fresh image right after the file is rewritten (see [QR timing](#qr-timing)). |
+| After the scan nothing happens, `status` says "not authorized any more", but Devices shows a new session | The account has two-step verification and the password was not available. The scan was accepted; the login is waiting for the password. | Set `TGBOT_PASSWORD` and run the same login command again. No new scan is needed. `status` now says "login is not finished". |
+| Wrong 2FA password, and the next QR login seems stuck | The scan is still valid and waits for a correct password. | Fix `TGBOT_PASSWORD` and rerun, or throw the half-done login away with `tgbot user login --reset`, then end the stray session in Settings > Devices. |
+| `tgbot user status` says "a login is in progress" | A `login` process holds the profile (the QR is waiting to be scanned, or the password to be entered). Other commands fail at once instead of queueing. | Finish the login, or stop it with Ctrl-C / `kill`. |
+| "unknown flag --qr-file" (or `--import`, `session export`) | The installed binary is older than this page. The error names the build. | `go install github.com/swtormy/tgbot-cli/cmd/tgbot@main`, or `git pull && go build ./cmd/tgbot`. `tgbot --version` shows what you run. |
 | The agent runs in a sandbox or on a server you do not want to log in to | Login and the agent are in different places. | Log in once where you have a terminal and phone, then move the session: `tgbot user session export` there, `tgbot user login --import -` in the sandbox. |
 | "cannot reach Telegram" after ~40 s | The network passes TCP but drops Telegram's protocol. | See [Restricted networks](#restricted-networks). |
 
+### Phone-only owner, headless agent
+
+The owner has only a phone and talks to the agent in a chat; the agent runs on a machine with no terminal the owner can type in. This is the scenario that works. The owner asks the agent to log in; the agent does the steps, the owner scans and approves.
+
+1. **Before the scan**, the owner puts the 2FA password (if the account has one) into an environment file on the agent's machine, for example `chmod 600 ~/.config/tgbot-secrets/env` with `TGBOT_PASSWORD=...` and `TGBOT_API_ID` / `TGBOT_API_HASH`. It never goes through the chat. If the account has no two-step verification, nothing is needed.
+2. The agent runs, with that file loaded:
+   `tgbot user login --qr-file /tmp/tgbot-qr.png`
+   (keep it running; it needs no stdin and no terminal). It prints the expiry to stderr and rewrites the PNG about every 30 s.
+3. The agent sends the **current** `/tmp/tgbot-qr.png` to the owner right away (or shows it on the machine's screen). It checks `/tmp/tgbot-qr.png.json` (`expires_at`) and resends when the code is older than ~20 s.
+4. The owner scans it from the phone: Telegram > Settings > Devices > Link Desktop Device, and confirms.
+5. The process prints `QR scan accepted` and finishes with `ok: true`. If it says the account has two-step verification and `TGBOT_PASSWORD` is not set, the owner adds it to the env file and the agent reruns the same command (no new scan).
+6. If anything is stuck: `tgbot user login --reset`, then start again.
+
+Alternative with a terminal on the agent's desktop: the agent opens a terminal window with the command already typed, the owner looks at it over remote desktop and types any prompts. Nothing secret then passes through the chat.
+
+### QR timing
+
+- A QR code is valid for about 30 seconds. `--qr-file` rewrites the PNG when it expires and writes `PATH.json` next to it: `expires_at`, `refreshed_at`, `valid_seconds`. The PNG is replaced atomically, so reading it never gives a half-written image.
+- Send the image **right after** a refresh. By the time a chat forwards it, the phone may have a dead code. If the scan opens `desktop.telegram.org`, the code had expired: take the next image.
+- The login process waits for the scan as long as it runs; there is no overall time limit.
+
+### Writes from a headless agent
+
+`tgbot user access write` refuses to run without a terminal and needs the word `write` typed. Recommended flow for a headless agent: the agent opens a terminal on its desktop with `tgbot user access write` already typed, and the **owner** types `write` there (or runs it in any terminal on that machine). The agent must never type the confirmation itself.
+
 Rules that follow from this:
 
-- **Plan for one human step.** Whoever sets up the agent must be at a terminal with the phone in hand for a few minutes, once. After that the session lasts months and agents run commands without them.
-- **Never hand an agent your `api_hash`, login code, 2FA password or session string in chat.** Put them in environment variables or a file only your user can read (`chmod 600`), and let the human run `login`.
+- **Plan for one human step.** Whoever sets up the agent must be at the phone for a few minutes, once. After that the session lasts months and agents run commands without them.
+- **Never hand an agent your `api_hash`, login code, 2FA password or session string in chat.** Put them in environment variables or a file only your user can read (`chmod 600`).
 - **Use one session in one place.** After `session export`, stop using the original (`tgbot user logout --local` deletes only the local copy). Two places on one session make Telegram revoke it.
-- **Agents must not try to work around a failed login.** Report the JSON output (`via`, `hint`, `resend_via`, `resend_after_seconds`) to the user and stop.
+- **Agents must not try to work around a failed login** other than the QR flow above and `--reset`. Report the JSON output (`via`, `hint`, `resend_via`, `resend_after_seconds`) to the owner and stop.
+
+If the session does die, commands exit with code 3 and a clear message. Log in again.
 
 ## What you can do
 
@@ -188,7 +221,9 @@ Add `--profile NAME` (or set `TGBOT_PROFILE`) to any `tgbot user` command, inclu
 | "another tgbot user command has held profile" | Another command is still running. Wait, or stop the stuck one. |
 | "id ... is not known to this account" | Telegram needs an access hash. Refer to the chat once by `@username` or find it in `dialogs`. |
 | "cannot reach Telegram: tried tcp ..., websocket ..." | The network blocks Telegram's protocol (common on cloud sandboxes and corporate networks, even when `api.telegram.org` works for bots). Use a proxy: `--proxy socks5://host:port` or `TGBOT_PROXY=...` (an `http://` proxy works with `--transport websocket`), or another network. |
-| Login code never arrives | `via: app` = a message from the "Telegram" chat in an already-logged-in app, not an SMS. Wait `resend_after_seconds`, then `login --phone ... --resend` (SMS/call). Repeated tries make Telegram delay codes. Last resort: `login --qr`. |
+| Login code never arrives | `via: app` = a message from the "Telegram" chat in an already-logged-in app, not an SMS. If there is `resend_via`, wait `resend_after_seconds`, then `login --phone ... --resend`. If there is not, stop and use `login --qr` / `--qr-file`. Repeated tries make Telegram delay codes. |
+| "a login is in progress for profile" | A `login` process is waiting for a scan or a password. Finish or stop it. |
+| "login is not finished: the QR scan was accepted" | 2FA password was missing. Set `TGBOT_PASSWORD`, rerun `login --qr-file ...`; or `login --reset` to start over. |
 
 ## Files and environment variables
 
@@ -201,6 +236,7 @@ Config directory: `$TGBOT_HOME`, or `~/.config/tgbot` on Linux, `~/Library/Appli
 | `peers.json` | Cache of access hashes and chat names. Safe to delete. |
 | `cursors.json` | Positions for `poll`. Delete to start from a new baseline. |
 | `lock` | Cross-process lock. |
+| `login_pending.json`, `login_state.json`, `login_running.json` | State of an unfinished login (code requested, scan waiting for the 2FA password, login process alive). Removed by `login --reset` and when the login finishes. |
 
 | Variable | Use |
 |---|---|

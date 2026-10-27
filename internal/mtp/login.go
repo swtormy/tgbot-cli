@@ -33,7 +33,7 @@ type LoginOptions struct {
 	Resend          bool   // ask Telegram to deliver the pending code another way (SMS or call)
 	Password        string // 2FA password, only for this call
 	Prompt          func(label string, secret bool) (string, error)
-	ShowQR          func(url string)
+	ShowQR          func(url string, expires time.Time)
 }
 
 type LoginResult struct {
@@ -96,7 +96,7 @@ func CodeHint(via, next string, timeout int) string {
 	if next != "" {
 		h += fmt.Sprintf(" If nothing arrives, wait %ds and run the same command with --resend to get it by %s.", timeout, next)
 	} else if via == "app" {
-		h += " Telegram offers no other delivery. If the message never shows up (Telegram sometimes delivers nothing to third-party clients), log in on a computer with a terminal: `tgbot user login --qr` (scan from Settings > Devices > Link Desktop Device), then move the session here with `tgbot user session export` and `tgbot user login --import -`."
+		h += " Telegram offers no other delivery. If the message never shows up (Telegram sometimes delivers nothing to third-party clients), do not retry. Log in with a QR code: `tgbot user login --qr-file /tmp/tgbot-qr.png` (works without a terminal; show the image on another screen and scan it from Settings > Devices > Link Desktop Device), or `tgbot user login --qr` in a terminal, or log in on a computer and move the session with `tgbot user session export` / `tgbot user login --import -`."
 	}
 	return h
 }
@@ -161,6 +161,8 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 		return nil, err
 	}
 	defer unlock()
+	p.markLoginRunning(o)
+	defer p.clearLoginRunning()
 
 	if o.TelethonSession != "" {
 		data, err := session.TelethonSession(strings.TrimSpace(o.TelethonSession))
@@ -215,25 +217,34 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 		}
 		if o.QR {
 			if o.ShowQR == nil {
-				return usagef("--qr needs a terminal")
+				return usagef("--qr needs a terminal; use --qr-file PATH to write the code as an image instead")
+			}
+			if o.Password == "" && o.Prompt == nil {
+				fmt.Fprintln(o.Stderr, "Note: if this account has two-step verification, set TGBOT_PASSWORD before scanning. Without it the login stops after the scan and must be resumed.")
 			}
 			loggedIn := qrlogin.OnLoginToken(dispatcher)
 			_, err := client.QR().Auth(ctx, loggedIn, func(ctx context.Context, t qrlogin.Token) error {
-				o.ShowQR(t.URL())
+				o.ShowQR(t.URL(), t.Expires())
 				return nil
 			})
 			if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") {
+				_ = p.setLoginState(stateAwaiting2FA)
+				fmt.Fprintln(o.Stderr, "QR scan accepted. This account has two-step verification.")
 				pw := o.Password
 				if pw == "" && o.Prompt != nil {
+					fmt.Fprintln(o.Stderr, "Waiting for the two-step verification password.")
 					var perr error
 					if pw, perr = o.Prompt("Two-step verification password (not stored anywhere)", true); perr != nil {
 						return perr
 					}
 				}
 				if pw == "" {
-					return usagef("this account has two-step verification: set TGBOT_PASSWORD for this run")
+					return &Error{Kind: KindAuth, Message: "QR scan accepted, but the account has two-step verification and TGBOT_PASSWORD is not set. Nothing is lost: set TGBOT_PASSWORD and run the same login command again (no new scan is needed). To start over: `tgbot user login --reset`."}
 				}
 				_, err = client.Auth().Password(ctx, pw)
+				if errors.Is(err, auth.ErrPasswordInvalid) {
+					return &Error{Kind: KindAuth, Message: "wrong two-step verification password. The scan is still valid: fix TGBOT_PASSWORD and run the same login command again (no new scan is needed). To start over: `tgbot user login --reset`."}
+				}
 			}
 			if err != nil {
 				return wrapRPC(err)
@@ -252,7 +263,7 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 				}
 				sent, err = client.Auth().ResendCode(ctx, o.Phone, pend.Hash)
 				if tgerr.Is(err, "SEND_CODE_UNAVAILABLE") {
-					return usagef("Telegram has no other way to deliver the code (all methods were used). Wait a few minutes and start over without --resend, or try `--qr` in a terminal")
+					return usagef("Telegram has no other way to deliver the code. Do not retry: log in with a QR code instead. Headless agent: `tgbot user login --qr-file /tmp/tgbot-qr.png` (see docs/USER_MODE.md, \"Phone-only owner, headless agent\"). With a terminal: `tgbot user login --qr`")
 				}
 			} else {
 				sent, err = client.Auth().SendCode(ctx, o.Phone, auth.SendCodeOptions{})
@@ -292,6 +303,7 @@ func (p *Profile) Login(ctx context.Context, o LoginOptions) (*LoginResult, erro
 			return wrapRPC(err)
 		}
 		res.Self = st.User
+		p.clearLoginState()
 		return nil
 	})
 	if err != nil {
@@ -397,4 +409,81 @@ func ParseSessionBundle(s string) (apiID int, data []byte, err error) {
 		return 0, nil, usagef("not a tgbot session string (it starts with %q and comes from `tgbot user session export`)", bundlePrefix)
 	}
 	return b.APIID, b.Session, nil
+}
+
+const stateAwaiting2FA = "awaiting_2fa"
+
+func (p *Profile) statePath() string   { return filepath.Join(p.Dir, "login_state.json") }
+func (p *Profile) runningPath() string { return filepath.Join(p.Dir, "login_running.json") }
+
+type loginRunning struct {
+	PID     int       `json:"pid"`
+	Started time.Time `json:"started"`
+	Mode    string    `json:"mode"`
+}
+
+func (p *Profile) setLoginState(state string) error {
+	b, _ := json.Marshal(map[string]string{"state": state})
+	return writeAtomic(p.statePath(), b)
+}
+
+// LoginState is "awaiting_2fa" while a QR scan was accepted but the password is missing, else "".
+func (p *Profile) LoginState() string {
+	var v struct {
+		State string `json:"state"`
+	}
+	if b, err := os.ReadFile(p.statePath()); err == nil && json.Unmarshal(b, &v) == nil {
+		return v.State
+	}
+	return ""
+}
+
+func (p *Profile) clearLoginState() {
+	_ = os.Remove(p.statePath())
+	_ = os.Remove(p.pendingPath())
+}
+
+func (p *Profile) markLoginRunning(o LoginOptions) {
+	mode := "code"
+	switch {
+	case o.QR:
+		mode = "qr"
+	case o.TelethonSession != "" || o.TgbotSession != "":
+		mode = "import"
+	}
+	b, _ := json.Marshal(loginRunning{PID: os.Getpid(), Started: time.Now().UTC(), Mode: mode})
+	_ = writeAtomic(p.runningPath(), b)
+}
+
+func (p *Profile) clearLoginRunning() { _ = os.Remove(p.runningPath()) }
+
+func (p *Profile) loginRunningInfo() (loginRunning, bool) {
+	var r loginRunning
+	b, err := os.ReadFile(p.runningPath())
+	if err != nil || json.Unmarshal(b, &r) != nil {
+		return r, false
+	}
+	return r, true
+}
+
+// ResetLogin throws away an unfinished login (a pending code, or a QR scan that
+// still waits for the 2FA password) so the next login starts clean. A finished
+// session is never touched.
+func (p *Profile) ResetLogin(ctx context.Context, lockTimeout time.Duration) error {
+	unlock, err := p.lock(ctx, lockTimeout)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, pendErr := os.Stat(p.pendingPath())
+	if p.LoginState() == "" && pendErr != nil {
+		return usagef("nothing to reset: no unfinished login. A finished session is kept; to end it use `tgbot user logout`")
+	}
+	if p.LoginState() == stateAwaiting2FA {
+		_ = os.Remove(p.SessionPath())
+		_ = os.Remove(p.SessionPath() + ".bak")
+	}
+	_ = os.Remove(p.statePath())
+	_ = os.Remove(p.pendingPath())
+	return nil
 }

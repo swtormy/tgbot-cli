@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/skip2/go-qrcode"
 )
 
 // userHome makes a profile that looks logged in. No test here talks to Telegram.
@@ -225,5 +227,40 @@ func TestSessionExportNeedsTerminalAndImportRejectsJunk(t *testing.T) {
 	r = run(t, env, "", "user", "login", "--api-id", "1", "--api-hash", "x", "--import", "junk")
 	if r.code != 2 || !strings.Contains(r.err, "not a tgbot session string") {
 		t.Fatalf("exit %d err %s", r.code, r.err)
+	}
+}
+
+func TestLoginResetQrWithoutTerminalAndStaleHint(t *testing.T) {
+	env := map[string]string{"TGBOT_HOME": t.TempDir()}
+	r := run(t, env, "", "user", "login", "--reset")
+	if r.code != 2 || !strings.Contains(r.err, "nothing to reset") {
+		t.Fatalf("reset: exit %d err %s", r.code, r.err)
+	}
+	r = run(t, env, "", "user", "login", "--qr", "--api-id", "1", "--api-hash", "x")
+	if r.code != 2 || !strings.Contains(r.err, "--qr-file") {
+		t.Fatalf("--qr without terminal: exit %d err %s", r.code, r.err)
+	}
+	r = run(t, env, "", "user", "login", "--no-such-flag")
+	if r.code != 2 || !strings.Contains(r.err, "stale") {
+		t.Fatalf("unknown flag: exit %d err %s", r.code, r.err)
+	}
+}
+
+func TestWriteQRFileRecordsExpiry(t *testing.T) {
+	q, err := qrcode.New("tg://login?token=abc", qrcode.Medium)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "q.png")
+	if err := writeQRFile(q, path, time.Now().Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || !strings.HasPrefix(string(b), "\x89PNG") {
+		t.Fatalf("not a png: %v", err)
+	}
+	meta, err := os.ReadFile(path + ".json")
+	if err != nil || !strings.Contains(string(meta), "expires_at") {
+		t.Fatalf("meta: %s %v", meta, err)
 	}
 }
