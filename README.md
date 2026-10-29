@@ -49,7 +49,7 @@ Pick the archive for your OS and CPU from a [GitHub release](https://github.com/
 | Windows x86_64 | `tgbot_windows_amd64.zip` |
 | Windows arm64 | `tgbot_windows_arm64.zip` |
 
-Each archive contains the `tgbot` binary (`.exe` on Windows), plus `LICENSE` and `NOTICE`. Verify the download against `checksums.txt` from the same release:
+Each archive contains the `tgbot` binary (`.exe` on Windows), `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES`, and full dependency license texts under `third_party_licenses/`. Verify the download against `checksums.txt` from the same release:
 
 ```bash
 curl -fsSLO https://github.com/swtormy/tgbot-cli/releases/download/vX.Y.Z/checksums.txt
@@ -187,4 +187,4 @@ goreleaser release --snapshot --clean -p 1   # local release build into ./dist
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Release archives also ship `THIRD_PARTY_NOTICES` and `third_party_licenses/` (generated at build time with [go-licenses](https://github.com/google/go-licenses) v1.6.0).
