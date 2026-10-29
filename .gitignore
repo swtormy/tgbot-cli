@@ -2,3 +2,5 @@ dist/
 /tgbot
 /tgbot.exe
 *.test
+third_party_licenses/
+THIRD_PARTY_NOTICES

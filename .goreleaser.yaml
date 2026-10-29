@@ -1,0 +1,54 @@
+version: 2
+
+project_name: tgbot
+
+before:
+  hooks:
+    - go mod verify
+    - go install github.com/google/go-licenses@v1.6.0
+    - bash scripts/third-party-licenses.sh
+
+builds:
+  - id: tgbot
+    main: ./cmd/tgbot
+    binary: tgbot
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X=github.com/swtormy/tgbot-cli/internal/cli.Version={{.Version}}
+
+archives:
+  - id: default
+    ids:
+      - tgbot
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: true
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - NOTICE
+      - THIRD_PARTY_NOTICES
+      - src: third_party_licenses/**
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  draft: true
+
+changelog:
+  disable: true

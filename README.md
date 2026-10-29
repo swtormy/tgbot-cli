@@ -36,6 +36,31 @@ go install github.com/swtormy/tgbot-cli/cmd/tgbot@latest
 
 Prebuilt binaries for macOS, Linux and Windows are on the [releases page](https://github.com/swtormy/tgbot-cli/releases).
 
+### Download a release binary
+
+Pick the archive for your OS and CPU from a [GitHub release](https://github.com/swtormy/tgbot-cli/releases) (draft releases are visible to repo collaborators until published):
+
+| Platform | Archive |
+|---|---|
+| Linux x86_64 | `tgbot_linux_amd64.tar.gz` |
+| Linux arm64 | `tgbot_linux_arm64.tar.gz` |
+| macOS Intel | `tgbot_darwin_amd64.tar.gz` |
+| macOS Apple Silicon | `tgbot_darwin_arm64.tar.gz` |
+| Windows x86_64 | `tgbot_windows_amd64.zip` |
+| Windows arm64 | `tgbot_windows_arm64.zip` |
+
+Each archive contains the `tgbot` binary (`.exe` on Windows), `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES`, and full dependency license texts under `third_party_licenses/`. Verify the download against `checksums.txt` from the same release:
+
+```bash
+curl -fsSLO https://github.com/swtormy/tgbot-cli/releases/download/vX.Y.Z/checksums.txt
+curl -fsSLO https://github.com/swtormy/tgbot-cli/releases/download/vX.Y.Z/tgbot_linux_amd64.tar.gz
+grep ' tgbot_linux_amd64.tar.gz$' checksums.txt | sha256sum -c -
+tar -xzf tgbot_linux_amd64.tar.gz
+./tgbot_linux_amd64/tgbot --version
+```
+
+Replace `vX.Y.Z` with the tag you downloaded. On macOS without GNU `sha256sum`, use `shasum -a 256 -c` the same way.
+
 ## Quick start
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and export its token as `TELEGRAM_BOT_TOKEN`.
@@ -157,9 +182,9 @@ Layer-232 MTProto client: [gotd/td](https://github.com/gotd/td) (MIT).
 
 ```bash
 go test ./...
-scripts/build-release.sh    # cross-compiles into ./dist
+goreleaser release --snapshot --clean -p 1   # local release build into ./dist
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Release archives also ship `THIRD_PARTY_NOTICES` and `third_party_licenses/` (generated at build time with [go-licenses](https://github.com/google/go-licenses) v1.6.0).
