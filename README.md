@@ -1,6 +1,8 @@
 # tgbot
 
-Telegram from the shell, built for AI agents: the Bot API with a bot token, and your own account over MTProto. One binary, no server, JSON in and out.
+A command-line tool for the Telegram Bot API and your own Telegram account (MTProto), built for AI agents. One binary, no server, JSON in and out.
+
+tgbot is an unofficial, independent project and is not affiliated with, endorsed by, or sponsored by Telegram.
 
 Inspired by Google's [Gemini API CLI](https://github.com/google-gemini/gemini-api-cli).
 
@@ -165,7 +167,9 @@ To refresh the catalog, run `scripts/update-spec.sh`. A weekly workflow opens a 
 
 ## Security
 
-- The token is read from the environment only. It is never printed: error messages and `--dry-run` output replace it with `<TOKEN>`.
+- **Credentials stay on your machine.** The bot token is read from the environment (`TELEGRAM_BOT_TOKEN`) only. User-mode `api_id`, `api_hash`, and session data are stored under your local tgbot config directory (see [docs/USER_MODE.md](docs/USER_MODE.md)); they are not sent to the project authors or any third party.
+- **Not logged.** tgbot does not write tokens or session secrets to log files. Error messages and `--dry-run` output replace a bot token with `<TOKEN>` if it would appear in text.
+- **Telegram only.** Bot API requests go to `https://api.telegram.org` (or your `--api-url` / `TELEGRAM_API_URL`). User mode talks to Telegram's own MTProto endpoints (TCP or WebSocket to `*.web.telegram.org`). An optional `--proxy` / `TGBOT_PROXY` only routes that traffic; credentials are not exfiltrated elsewhere.
 - A bot can only act in chats it was added to, but that includes deleting messages and banning members where it is an admin. Review what you let an agent do, and use `--dry-run`.
 - Use a separate bot per project and revoke the token with `/revoke` in @BotFather if it leaks.
 
