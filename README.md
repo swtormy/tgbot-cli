@@ -130,7 +130,7 @@ Full guide for people and agents: [docs/USER_MODE.md](docs/USER_MODE.md).
 | `tgbot send <chat_id> <text>` | Shortcut for `sendMessage`. A text of `-` reads stdin. |
 | `tgbot updates` | `getUpdates` that prints `{"next_offset":N,"updates":[...]}`. `--state-file` remembers the offset between calls. |
 | `tgbot download <file_id>` | Fetches a file and prints the local path. |
-| `tgbot <method> [flags]` | Any of the 185 Bot API methods, for example `sendPhoto`, `pinChatMessage`, `createForumTopic`. |
+| `tgbot <method> [flags]` | Any of the 193 Bot API methods, for example `sendPhoto`, `pinChatMessage`, `createForumTopic`. |
 | `tgbot methods` | Lists all methods. |
 | `tgbot <method> --help` | Parameters of one method. |
 | `tgbot <method> --schema` | JSON Schema of the request body. |
@@ -161,7 +161,7 @@ Global flags: `--dry-run`, `--jq EXPR` (strings print raw), `--pretty`, `--api-u
 
 ## How it works
 
-The method catalog (names, parameters, types, required flags) is embedded in the binary from the machine-readable Bot API description in [PaulSonOfLars/telegram-bot-api-spec](https://github.com/PaulSonOfLars/telegram-bot-api-spec), currently Bot API 10.3. At start-up tgbot turns it into commands and flags, so `--help`, `--schema` and `--usage` always match what the binary can actually send. Calls are plain HTTPS `POST`s to `https://api.telegram.org/bot<token>/<method>`.
+The method catalog (names, parameters, types, required flags) is embedded in the binary from the machine-readable Bot API description in [PaulSonOfLars/telegram-bot-api-spec](https://github.com/PaulSonOfLars/telegram-bot-api-spec), currently Bot API 10.4. At start-up tgbot turns it into commands and flags, so `--help`, `--schema` and `--usage` always match what the binary can actually send. Calls are plain HTTPS `POST`s to `https://api.telegram.org/bot<token>/<method>`.
 
 To refresh the catalog, run `scripts/update-spec.sh`. A weekly workflow opens a pull request with the update.
 

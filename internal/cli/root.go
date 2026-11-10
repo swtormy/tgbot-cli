@@ -241,7 +241,7 @@ func (a *app) rootCmd(args []string) *cobra.Command {
 	root.Flags().BoolVar(&a.usage, "usage", false, "print every method and its parameters as compact JSON")
 
 	root.AddCommand(a.sendCmd(), a.updatesCmd(), a.downloadCmd(), a.methodsCmd(), a.skillCmd(), a.userCmd())
-	// Method commands are built only when named in the arguments: 185 commands
+	// Method commands are built only when named in the arguments: 193 commands
 	// would clutter --help and slow every start.
 	for _, arg := range args {
 		if m, ok := a.spec.Methods[arg]; ok {

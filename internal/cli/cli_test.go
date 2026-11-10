@@ -158,7 +158,7 @@ func TestTokenNeverLeaksOnTransportError(t *testing.T) {
 func TestUsageErrors(t *testing.T) {
 	env := map[string]string{"TELEGRAM_BOT_TOKEN": testToken}
 	cases := map[string][]string{
-		"missing required":   {"sendMessage", "--text", "hi"},
+		"missing required":   {"sendMessage", "--chat_id", "1"},
 		"bad json":           {"sendMessage", "--chat_id", "1", "--text", "x", "--reply_markup", "{oops", "--dry-run"},
 		"bad integer":        {"sendPoll", "--chat_id", "1", "--question", "q", "--options", "[]", "--open_period", "abc", "--dry-run"},
 		"unknown body key":   {"sendMessage", "--body", `{"chat_id":1,"text":"x","txt":"y"}`, "--dry-run"},
@@ -337,12 +337,14 @@ func TestSchemaAndUsageNeedNoToken(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.stdout), &s); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s.Schema, "2020-12") || s.Properties["chat_id"] == nil || len(s.Required) < 2 {
+	if !strings.Contains(s.Schema, "2020-12") || s.Properties["chat_id"] == nil || len(s.Required) < 1 {
 		t.Errorf("schema = %s", r.stdout)
 	}
 
 	r = run(t, nil, "", "--usage")
-	if r.code != 0 || !json.Valid([]byte(r.stdout)) || !strings.Contains(r.stdout, `"chat_id!:Integer|String"`) {
+	if r.code != 0 || !json.Valid([]byte(r.stdout)) ||
+		!strings.Contains(r.stdout, `"chat_id:Integer|String"`) ||
+		!strings.Contains(r.stdout, `"text!:String"`) {
 		t.Fatalf("usage: exit %d, valid=%v", r.code, json.Valid([]byte(r.stdout)))
 	}
 }
